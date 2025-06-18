@@ -3,6 +3,7 @@
 #include <iostream>
 #include <fstream>
 #include <filesystem>
+#include <unordered_map>
 
 #include "Pmx.h"
 #include "Vmd.h"
@@ -390,6 +391,14 @@ int main()
         }
         // 이후 루프에서 이 `motion`을 사용
     }
+    sort(motion->bone_frames.begin(), motion->bone_frames.end(),
+        [](const vmd::VmdBoneFrame& a, const vmd::VmdBoneFrame& b) {
+            return a.frame < b.frame;
+        });
+    sort(motion->face_frames.begin(), motion->face_frames.end(),
+        [](const vmd::VmdFaceFrame& a, const vmd::VmdFaceFrame& b) {
+            return a.frame < b.frame;
+        });
 
     pmx::PmxModel model;
     ifstream file(pmxPath, ios::binary);
@@ -519,7 +528,12 @@ int main()
     }
     gIndices.assign(model.indices.get(), model.indices.get() + model.index_count);
 
-    vector<glm::mat4> boneMatrices(512, glm::mat4(1.0f));
+    struct BonePose {
+        glm::vec3 position;
+        glm::quat rotation;
+    };
+    unordered_map<string, BonePose> bonePoses;
+    unordered_map<string, float> morphWeights;
 
     vector<pmx::PmxMaterial> originalMaterials(
         model.materials.get(),
@@ -585,7 +599,6 @@ int main()
         shader.setMat4("view", view);
         shader.setMat4("projection", projection);
 
-
         // ✅ 라이트 방향 계산
         float lyawRad = glm::radians(lightYaw);
         float lpitchRad = glm::radians(lightPitch);
@@ -605,6 +618,7 @@ int main()
         glUniform1i(glGetUniformLocation(shader.ID, "sphereTex"), 2);
 
         // 이전 프레임 상태 초기화
+        vector<glm::mat4> boneMatrices(512, glm::mat4(1.0f));
         copy(originalMaterials.begin(), originalMaterials.end(), model.materials.get());
         gVertices = originalVertices;
 
@@ -614,34 +628,63 @@ int main()
 
         // 본 프레임 적용
         for (const auto& bone : motion->bone_frames) {
-            if (bone.frame == currentFrame) {
-                oguna::EncodingConverter converter;
-                string boneName;
-                converter.Cp932ToUtf8(bone.name.c_str(), static_cast<int>(bone.name.length()), &boneName);
-                int boneIndex = FindBoneIndexByName(model, boneName);
-                if (boneIndex >= 0)
-                {
-                    cout << "[BONE] 프레임 (utf8Name) " << bone.frame << "에 비교: \"" << boneName << "\"\n";
-                    cout << "[MORPH] 프레임 " << bone.frame << "에 적용됨: " << bone.name << " -> 인덱스 " << boneIndex << "\n";
-                    glm::vec3 t(bone.position[0], bone.position[1], bone.position[2]);
-                    glm::quat q(bone.orientation[3], bone.orientation[0], bone.orientation[1], bone.orientation[2]);
-                    boneMatrices[boneIndex] = glm::translate(glm::mat4(1.0f), t) * glm::toMat4(q);
+            if (bone.frame > currentFrame) continue;
+            std::string boneName;
+            oguna::EncodingConverter converter;
+            converter.Cp932ToUtf8(bone.name.c_str(), static_cast<int>(bone.name.length()), &boneName);
+
+            BonePose pose;
+            pose.position = glm::vec3(bone.position[0], bone.position[1], bone.position[2]);
+            pose.rotation = glm::quat(bone.orientation[3], bone.orientation[0], bone.orientation[1], bone.orientation[2]);
+            bonePoses[boneName] = pose;
+        }
+        for (int i = 0; i < model.bone_count; ++i) {
+            const auto& bone = model.bones[i];
+            glm::vec3 t(bone.position[0], bone.position[1], bone.position[2]);
+            glm::quat r(1, 0, 0, 0);
+
+            std::string boneName;
+            oguna::EncodingConverter converter;
+            converter.Utf16ToUtf8(bone.bone_name.c_str(), static_cast<int>(bone.bone_name.length()), &boneName);
+
+            auto it = bonePoses.find(boneName);
+            if (it != bonePoses.end()) {
+                const auto& delta = it->second;
+
+                if (bone.parent_index >= 0 && bone.parent_index < model.bone_count) {
+                    glm::vec3 parentT(model.bones[bone.parent_index].position[0],
+                        model.bones[bone.parent_index].position[1],
+                        model.bones[bone.parent_index].position[2]);
+                    t += delta.position - parentT;
                 }
+                else {
+                    t += delta.position;
+                }
+
+                r = delta.rotation;
+            }
+
+            boneMatrices[i] = glm::translate(glm::mat4(1.0f), t) * glm::toMat4(r);
+        }
+        for (int i = 0; i < model.bone_count; ++i) {
+            int parent = model.bones[i].parent_index;
+            if (parent >= 0 && parent < model.bone_count) {
+                boneMatrices[i] = boneMatrices[parent] * boneMatrices[i];
             }
         }
 
         // 모프 프레임 적용
         for (const auto& face : motion->face_frames) {
-            if (face.frame == currentFrame) {
-                oguna::EncodingConverter converter;
-                string faceName;
-                converter.Cp932ToUtf8(face.face_name.c_str(), static_cast<int>(face.face_name.length()), &faceName);
-                int morphIndex = FindMorphIndexByName(model, faceName);
-                if (morphIndex >= 0)
-                {
-                    cout << "[MORPH] 프레임 " << face.frame << "에 적용됨: " << face.face_name << " -> 인덱스 " << morphIndex << " / weight = " << face.weight << "\n";
-                    ApplyMorph(model, gVertices, boneMatrices, morphIndex, face.weight);
-                }
+            if (face.frame > currentFrame) continue;
+            std::string faceName;
+            oguna::EncodingConverter converter;
+            converter.Cp932ToUtf8(face.face_name.c_str(), static_cast<int>(face.face_name.length()), &faceName);
+            morphWeights[faceName] = face.weight;
+        }
+        for (const auto& [name, weight] : morphWeights) {
+            int morphIndex = FindMorphIndexByName(model, name);
+            if (morphIndex >= 0) {
+                ApplyMorph(model, gVertices, boneMatrices, morphIndex, weight);
             }
         }
 
