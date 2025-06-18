@@ -6,6 +6,7 @@
 #include <iostream>
 #include <fstream>
 #include <ostream>
+#include "EncodingHelper.h"
 
 namespace vmd
 {
@@ -295,7 +296,13 @@ namespace vmd
 
 		bool SaveToFile(const std::u16string& filename)
 		{
-			std::ofstream stream(filename.c_str(), std::ios::binary);
+			oguna::EncodingConverter converter;
+			std::wstring wide(filename.begin(), filename.end());
+
+			std::string utf8Filename;
+			converter.Utf16ToUtf8(wide.c_str(), static_cast<int>(wide.length()), &utf8Filename);
+
+			std::ofstream stream(utf8Filename, std::ios::binary);
 			auto result = SaveToStream(&stream);
 			stream.close();
 			return result;
