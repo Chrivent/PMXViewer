@@ -12,15 +12,15 @@ out vec3 FragWorldPos;
 uniform mat4 model;
 uniform mat4 view;
 uniform mat4 projection;
-uniform mat4 skinMatrices[512]; // 최대 본 수 (필요 시 늘리기)
+uniform mat4 boneMatrices[512]; // 최대 본 수 (필요 시 늘리기)
 
 void main() {
     // 스킨 매트릭스 계산 (Linear Blend Skinning)
     mat4 skinMatrix =
-        boneWeights[0] * skinMatrices[boneIndices[0]] +
-        boneWeights[1] * skinMatrices[boneIndices[1]] +
-        boneWeights[2] * skinMatrices[boneIndices[2]] +
-        boneWeights[3] * skinMatrices[boneIndices[3]];
+        boneWeights[0] * boneMatrices[boneIndices[0]] +
+        boneWeights[1] * boneMatrices[boneIndices[1]] +
+        boneWeights[2] * boneMatrices[boneIndices[2]] +
+        boneWeights[3] * boneMatrices[boneIndices[3]];
 
     // 위치와 노멀 스키닝 적용
     vec4 skinnedPos = skinMatrix * vec4(position, 1.0);

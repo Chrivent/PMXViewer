@@ -50,8 +50,6 @@ float lightYaw = -45.0f;   // 초기 조명 방향 (degree)
 float lightPitch = 45.0f;
 bool leftMouseDown = false;
 
-float test = 0;
-
 void LoadTextures(const pmx::PmxModel& model, const string& pmxBaseDir) {
     gTextures.resize(model.texture_count, 0);
 
@@ -82,7 +80,7 @@ void LoadTextures(const pmx::PmxModel& model, const string& pmxBaseDir) {
     }
 }
 
-void ApplyMorph(const pmx::PmxModel& model, vector<GLVertex>& vertices, vector<glm::mat4>& boneMatrices, int morphIndex, float weight) {
+void ApplyMorph(const pmx::PmxModel& model, vector<GLVertex>& vertices, vector<glm::mat4>& localMatrices, int morphIndex, float weight) {
     if (morphIndex < 0 || morphIndex >= model.morph_count) return;
 
     const auto& morph = model.morphs[morphIndex];
@@ -150,53 +148,38 @@ void ApplyMorph(const pmx::PmxModel& model, vector<GLVertex>& vertices, vector<g
         for (int i = 0; i < morph.offset_count; ++i) {
             const auto& offset = morph.bone_offsets[i];
             int bi = offset.bone_index;
-            if (bi < 0 || bi >= 512) continue;
+            if (bi < 0 || bi >= static_cast<int>(localMatrices.size())) continue;
+
+            const auto& bone = model.bones[bi];
+            glm::vec3 pivot(bone.position[0], bone.position[1], bone.position[2]);
 
             glm::vec3 t(offset.translation[0], offset.translation[1], offset.translation[2]);
             glm::quat r(offset.rotation[3], offset.rotation[0], offset.rotation[1], offset.rotation[2]); // wxyz
 
-            // 모프 weight에 따라 보간된 트랜스폼 생성
+            // 보간된 트랜스폼
             glm::mat4 trans = glm::translate(glm::mat4(1.0f), t * weight);
             glm::mat4 rot = glm::toMat4(glm::slerp(glm::quat(), r, weight));
 
-            // 최종 행렬 적용: 기존 행렬에 추가 적용
-            boneMatrices[bi] = trans * rot * boneMatrices[bi];
+            // 피벗 기준으로 회전·이동 적용: Tpivot * (T * R) * Tinv
+            glm::mat4 morphMat = glm::translate(glm::mat4(1.0f), pivot)
+                * trans * rot
+                * glm::translate(glm::mat4(1.0f), -pivot);
+
+            // 기존 local 행렬에 적용
+            localMatrices[bi] = morphMat * localMatrices[bi];
         }
         break;
 
     case pmx::MorphType::Group:
         for (int i = 0; i < morph.offset_count; ++i) {
             const auto& group = morph.group_offsets[i];
-            ApplyMorph(model, vertices, boneMatrices, group.morph_index, group.morph_weight * weight);
+            ApplyMorph(model, vertices, localMatrices, group.morph_index, group.morph_weight * weight);
         }
         break;
 
     default:
         break;
     }
-}
-
-int FindBoneIndexByName(const pmx::PmxModel& model, const string& name) {
-    oguna::EncodingConverter converter;
-    wstring wname;
-    converter.Utf8ToUtf16(name.data(), (int)name.size(), &wname);
-    for (int i = 0; i < model.bone_count; ++i)
-    {
-        const wstring boneName = model.bones[i].bone_name;
-        if (boneName == wname) return i;
-    }
-    return -1;
-}
-
-int FindMorphIndexByName(const pmx::PmxModel& model, const string& name) {
-    oguna::EncodingConverter converter;
-    wstring wname;
-    converter.Utf8ToUtf16(name.data(), (int)name.size(), &wname);
-    for (int i = 0; i < model.morph_count; ++i) {
-        wstring morphName = model.morphs[i].morph_name;
-        if (morphName == wname) return i;
-    }
-    return -1;
 }
 
 class Shader {
@@ -303,8 +286,6 @@ void CursorPosCallback(GLFWwindow* window, double xpos, double ypos)
         lightYaw -= dx * lightSensitivity;
         lightPitch += dy * lightSensitivity;
         lightPitch = clamp(lightPitch, -89.0f, 89.0f);
-
-        test -= dx * lightSensitivity;
     }
 }
 
@@ -415,24 +396,6 @@ int main()
     pmx::PmxModel model;
     ifstream file(pmxPath, ios::binary);
     model.Read(&file);
-
-    vector<glm::mat4> bindPoseMatrices(model.bone_count);
-    for (int i = 0; i < model.bone_count; ++i) {
-        const auto& b = model.bones[i];
-        glm::vec3 t(b.position[0], b.position[1], b.position[2]);
-        glm::mat4 local = glm::translate(glm::mat4(1.0f), t);
-
-        if (b.parent_index >= 0 && b.parent_index < model.bone_count) {
-            bindPoseMatrices[i] = bindPoseMatrices[b.parent_index] * local;
-        }
-        else {
-            bindPoseMatrices[i] = local;
-        }
-    }
-    vector<glm::mat4> inverseBindPoseMatrices(model.bone_count);
-    for (int i = 0; i < model.bone_count; ++i) {
-        inverseBindPoseMatrices[i] = glm::inverse(bindPoseMatrices[i]);
-    }
 
     // GLFW 초기화
     if (!glfwInit()) {
@@ -562,7 +525,7 @@ int main()
         glm::vec3 position;
         glm::quat rotation;
     };
-    unordered_map<string, BonePose> bonePoses;
+    unordered_map<wstring, BonePose> bonePoses;
     unordered_map<string, float> morphWeights;
 
     vector<pmx::PmxMaterial> originalMaterials(
@@ -656,35 +619,34 @@ int main()
         int currentFrame = static_cast<int>(time * 30.0f); // 30fps
 
         // 본 프레임 적용
-        std::vector<glm::mat4> localMatrices(model.bone_count);
+        for (const auto& frame : motion->bone_frames) {
+            if (frame.frame > currentFrame) continue;
+            std::wstring boneName;
+            oguna::EncodingConverter converter;
+            converter.Cp932ToUtf16(frame.name.c_str(), static_cast<int>(frame.name.length()), &boneName);
+            glm::vec3 pos(frame.position[0], frame.position[1], frame.position[2]);
+            glm::quat rot(frame.orientation[3], frame.orientation[0], frame.orientation[1], frame.orientation[2]);
+            bonePoses[boneName] = { pos, rot };
+        }
+        vector<glm::mat4> localMatrices(model.bone_count);
         for (int i = 0; i < model.bone_count; ++i) {
             const auto& bone = model.bones[i];
+            std::wstring name = bone.bone_name;
 
-            glm::vec3 t(bone.position[0], bone.position[1], bone.position[2]);
-            glm::quat r = glm::quat(1, 0, 0, 0);
+            glm::vec3 pivot(bone.position[0], bone.position[1], bone.position[2]);
+            glm::vec3 animOffset(0.0f);
+            glm::quat animRot = glm::quat(1, 0, 0, 0);
 
-            if (i == 11) {
-                r = glm::angleAxis(glm::radians(test), glm::vec3(0, 0, 1));
+            auto it = bonePoses.find(name);
+            if (it != bonePoses.end()) {
+                animOffset = it->second.position;
+                animRot = it->second.rotation;
             }
-
-            localMatrices[i] = glm::translate(glm::mat4(1.0f), t) * glm::toMat4(r);
+            glm::vec3 finalPos = pivot + animOffset;
+            localMatrices[i] = glm::translate(glm::mat4(1.0f), finalPos)
+                * glm::toMat4(animRot)
+                * glm::translate(glm::mat4(1.0f), -pivot);
         }
-        std::vector<glm::mat4> boneMatrices(model.bone_count);
-        for (int i = 0; i < model.bone_count; ++i) {
-            int parent = model.bones[i].parent_index;
-            if (parent >= 0) {
-                boneMatrices[i] = boneMatrices[parent] * localMatrices[i];
-            }
-            else {
-                boneMatrices[i] = localMatrices[i];
-            }
-        }
-        std::vector<glm::mat4> skinMatrices(model.bone_count);
-        for (int i = 0; i < model.bone_count; ++i) {
-            skinMatrices[i] = boneMatrices[i] * inverseBindPoseMatrices[i];
-        }
-        GLint loc = glGetUniformLocation(shader.ID, "skinMatrices");
-        glUniformMatrix4fv(loc, 512, GL_FALSE, glm::value_ptr(skinMatrices[0]));
 
         // 모프 프레임 적용
         for (const auto& face : motion->face_frames) {
@@ -695,11 +657,26 @@ int main()
             morphWeights[faceName] = face.weight;
         }
         for (const auto& [name, weight] : morphWeights) {
-            int morphIndex = FindMorphIndexByName(model, name);
-            if (morphIndex >= 0) {
-                ApplyMorph(model, gVertices, skinMatrices, morphIndex, weight);
+            auto it = morphWeights.find(name);
+            if (it != morphWeights.end()) {
+                int morphIndex = it->second;
+                ApplyMorph(model, gVertices, localMatrices, morphIndex, weight);
             }
         }
+
+        vector<glm::mat4> boneMatrices(model.bone_count);
+        for (int i = 0; i < model.bone_count; ++i) {
+            int parent = model.bones[i].parent_index;
+            if (parent >= 0) {
+                boneMatrices[i] = boneMatrices[parent] * localMatrices[i];
+            }
+            else {
+                boneMatrices[i] = localMatrices[i];
+            }
+        }
+        GLint loc = glGetUniformLocation(shader.ID, "boneMatrices");
+        glUniformMatrix4fv(loc, 512, GL_FALSE, glm::value_ptr(boneMatrices[0]));
+
         glBindBuffer(GL_ARRAY_BUFFER, vbo);
         glBufferData(GL_ARRAY_BUFFER, gVertices.size() * sizeof(GLVertex), gVertices.data(), GL_STATIC_DRAW);
 
