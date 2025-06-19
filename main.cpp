@@ -214,72 +214,7 @@ float BezierInterpolate(const char curve[4], float t) {
 void SolveIK(const pmx::PmxBone& ikBone, const pmx::PmxBone* bones, int boneCount,
     std::vector<glm::mat4>& transformMatrices)
 {
-    // 1) IK 설정
-    const int effectorIdx = ikBone.ik_links[ikBone.ik_link_count - 1].link_target;
-    const int targetIdx = ikBone.ik_target_bone_index;
-    const int maxIter = ikBone.ik_loop;
-    const float maxStep = ikBone.ik_loop_angle_limit;
-
-    if (ikBone.ik_link_count == 0) return;
-
-    // 2) worldMatrices 계산용 버퍼
-    std::vector<glm::mat4> worldMatrices(boneCount);
-
-    // 부모→자식 계층 누적 함수
-    auto UpdateWorld = [&]() {
-        for (int i = 0; i < boneCount; ++i) {
-            int p = bones[i].parent_index;
-            if (p >= 0)
-                worldMatrices[i] = worldMatrices[p] * transformMatrices[i];
-            else
-                worldMatrices[i] = transformMatrices[i];
-        }
-        };
-
-    // 3) CCD 반복
-    for (int iter = 0; iter < maxIter; ++iter) {
-        // (a) 매 반복마다 현재 worldMatrices 갱신
-        UpdateWorld();
-
-        // (b) 각 IK 링크에 대해 joint 회전 누적
-        for (int l = 0; l < ikBone.ik_link_count; ++l) {
-            int linkIdx = ikBone.ik_links[l].link_target;
-
-            // joint / effector / target 월드 위치
-            glm::vec3 jointPos = glm::vec3(worldMatrices[linkIdx] * glm::vec4(0, 0, 0, 1));
-            glm::vec3 effectorPos = glm::vec3(worldMatrices[effectorIdx] * glm::vec4(0, 0, 0, 1));
-            glm::vec3 targetPos = glm::vec3(worldMatrices[targetIdx] * glm::vec4(0, 0, 0, 1));
-
-            // 방향 벡터
-            glm::vec3 toEff = effectorPos - jointPos;
-            glm::vec3 toTar = targetPos - jointPos;
-            float lenEff = glm::length(toEff), lenTar = glm::length(toTar);
-            if (lenEff < 1e-6f || lenTar < 1e-6f) continue;
-            toEff /= lenEff;  toTar /= lenTar;
-
-            // 회전축·회전각 계산
-            float cosA = glm::clamp(glm::dot(toEff, toTar), -1.0f, 1.0f);
-            float angle = acos(cosA);
-            if (angle < 1e-4f) continue;
-            angle = glm::min(angle, maxStep);
-
-            glm::vec3 axis = glm::normalize(glm::cross(toEff, toTar));
-            if (glm::length2(axis) < 1e-6f) continue;
-            axis = glm::normalize(axis);
-
-            glm::quat dq = glm::angleAxis(angle, axis);
-            glm::vec3 pivot(bones[linkIdx].position[0],
-                bones[linkIdx].position[1],
-                bones[linkIdx].position[2]);
-
-            glm::mat4 T1 = glm::translate(glm::mat4(1.0f), pivot);
-            glm::mat4 R = glm::toMat4(dq);
-            glm::mat4 T0 = glm::translate(glm::mat4(1.0f), -pivot);
-
-            // 4) 로컬 변형 매트릭스에 회전 누적
-            transformMatrices[linkIdx] = T1 * R * T0 * transformMatrices[linkIdx];
-        }
-    }
+    
 }
 
 class Shader {
@@ -783,7 +718,7 @@ int main()
             pose.orientation = rot;
             memcpy(pose.interpolation, f1->interpolation, sizeof(char) * 4 * 4 * 4); // optional
 
-            //bonePoses[name] = pose;
+            bonePoses[name] = pose;
         }
 
         if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) footOffsetY += 0.5f;
@@ -835,7 +770,7 @@ int main()
         for (int i = 0; i < model.bone_count; ++i) {
             const auto& bone = model.bones[i];
             if (bone.bone_flag & 0x20 /* IK 플래그 */) {
-                //SolveIK(bone, model.bones.get(), model.bone_count, transformMatrices);
+                SolveIK(bone, model.bones.get(), model.bone_count, transformMatrices);
             }
         }
 
