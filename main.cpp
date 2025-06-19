@@ -526,7 +526,7 @@ int main()
         glm::quat rotation;
     };
     unordered_map<wstring, BonePose> bonePoses;
-    unordered_map<string, float> morphWeights;
+    unordered_map<wstring, float> morphWeights;
 
     vector<pmx::PmxMaterial> originalMaterials(
         model.materials.get(),
@@ -651,17 +651,22 @@ int main()
         // 모프 프레임 적용
         for (const auto& face : motion->face_frames) {
             if (face.frame > currentFrame) continue;
-            std::string faceName;
+            std::wstring faceName;
             oguna::EncodingConverter converter;
-            converter.Cp932ToUtf8(face.face_name.c_str(), static_cast<int>(face.face_name.length()), &faceName);
+            converter.Cp932ToUtf16(face.face_name.c_str(), static_cast<int>(face.face_name.length()), &faceName);
             morphWeights[faceName] = face.weight;
         }
-        for (const auto& [name, weight] : morphWeights) {
+        for (int i = 0; i < model.morph_count; ++i) {
+            const auto& morph = model.morphs[i];
+            std::wstring name = morph.morph_name;
+
+            float weight = 0.0f;
+
             auto it = morphWeights.find(name);
             if (it != morphWeights.end()) {
-                int morphIndex = it->second;
-                ApplyMorph(model, gVertices, localMatrices, morphIndex, weight);
+                weight = it->second;
             }
+            ApplyMorph(model, gVertices, localMatrices, i, weight);
         }
 
         vector<glm::mat4> boneMatrices(model.bone_count);
