@@ -4,6 +4,8 @@
 #include <fstream>
 #include <filesystem>
 #include <unordered_map>
+#include <fcntl.h>
+#include <io.h>
 
 #include "Pmx.h"
 #include "Vmd.h"
@@ -47,6 +49,8 @@ glm::vec3 cameraTarget = glm::vec3(0, 5, 0);
 float lightYaw = -45.0f;   // 초기 조명 방향 (degree)
 float lightPitch = 45.0f;
 bool leftMouseDown = false;
+
+float test = 0;
 
 void LoadTextures(const pmx::PmxModel& model, const string& pmxBaseDir) {
     gTextures.resize(model.texture_count, 0);
@@ -299,6 +303,8 @@ void CursorPosCallback(GLFWwindow* window, double xpos, double ypos)
         lightYaw -= dx * lightSensitivity;
         lightPitch += dy * lightSensitivity;
         lightPitch = clamp(lightPitch, -89.0f, 89.0f);
+
+        test -= dx * lightSensitivity;
     }
 }
 
@@ -338,6 +344,8 @@ vector<string> FindAllVMDFiles(const string& folderPath) {
 
 int main()
 {
+    _setmode(_fileno(stdout), _O_U16TEXT);
+
     string modelFolder = "C:/Users/Ha Yechan/Desktop/PMXViewer/models";
     vector<string> pmxFiles = FindAllPMXFiles(modelFolder);
 
@@ -347,14 +355,14 @@ int main()
     }
 
     // 목록 출력
-    cout << "[ PMX 모델 목록 ]\n";
+    cerr << "[ PMX 모델 목록 ]\n";
     for (size_t i = 0; i < pmxFiles.size(); ++i) {
-        cout << i << ": " << pmxFiles[i] << "\n";
+        cerr << i << ": " << pmxFiles[i] << "\n";
     }
 
     // 선택 입력
     int selected = -1;
-    cout << "\n불러올 모델 번호를 입력하세요: ";
+    cerr << "\n불러올 모델 번호를 입력하세요: ";
     cin >> selected;
 
     if (selected < 0 || selected >= static_cast<int>(pmxFiles.size())) {
@@ -363,7 +371,7 @@ int main()
     }
 
     string pmxPath = pmxFiles[selected];
-    cout << "선택된 PMX 파일: " << pmxPath << "\n";
+    cerr << "선택된 PMX 파일: " << pmxPath << "\n";
 
     string vmdFolder = "C:/Users/Ha Yechan/Desktop/PMXViewer/motions";
     vector<string> vmdFiles = FindAllVMDFiles(vmdFolder); // 확장자 필터링 함수 개선 권장
@@ -373,24 +381,28 @@ int main()
         return 1;
     }
 
-    cout << "\n[ VMD 파일 목록 ]\n";
+    cerr << "\n[ VMD 파일 목록 ]\n";
     for (size_t i = 0; i < vmdFiles.size(); ++i) {
-        cout << i << ": " << vmdFiles[i] << "\n";
+        cerr << i << ": " << vmdFiles[i] << "\n";
     }
 
     int vmdSelected = -1;
-    cout << "\n불러올 VMD 번호를 입력하세요 (-1 = 무시): ";
+    cerr << "\n불러올 VMD 번호를 입력하세요: ";
     cin >> vmdSelected;
 
-    unique_ptr<vmd::VmdMotion> motion;
-    if (vmdSelected >= 0 && vmdSelected < static_cast<int>(vmdFiles.size())) {
-        motion = vmd::VmdMotion::LoadFromFile(vmdFiles[vmdSelected].c_str());
-        if (!motion) {
-            cerr << "VMD 로딩 실패!\n";
-            return 1;
-        }
-        // 이후 루프에서 이 `motion`을 사용
+    if (vmdSelected < 0 || vmdSelected >= static_cast<int>(vmdFiles.size())) {
+        cerr << "잘못된 선택입니다.\n";
+        return 1;
     }
+
+    unique_ptr<vmd::VmdMotion> motion;
+    motion = vmd::VmdMotion::LoadFromFile(vmdFiles[vmdSelected].c_str());
+    if (!motion) {
+        cerr << "VMD 로딩 실패!\n";
+        return 1;
+    }
+    // 이후 루프에서 이 `motion`을 사용
+
     sort(motion->bone_frames.begin(), motion->bone_frames.end(),
         [](const vmd::VmdBoneFrame& a, const vmd::VmdBoneFrame& b) {
             return a.frame < b.frame;
@@ -403,6 +415,24 @@ int main()
     pmx::PmxModel model;
     ifstream file(pmxPath, ios::binary);
     model.Read(&file);
+
+    vector<glm::mat4> bindPoseMatrices(model.bone_count);
+    for (int i = 0; i < model.bone_count; ++i) {
+        const auto& b = model.bones[i];
+        glm::vec3 t(b.position[0], b.position[1], b.position[2]);
+        glm::mat4 local = glm::translate(glm::mat4(1.0f), t);
+
+        if (b.parent_index >= 0 && b.parent_index < model.bone_count) {
+            bindPoseMatrices[i] = bindPoseMatrices[b.parent_index] * local;
+        }
+        else {
+            bindPoseMatrices[i] = local;
+        }
+    }
+    vector<glm::mat4> inverseBindPoseMatrices(model.bone_count);
+    for (int i = 0; i < model.bone_count; ++i) {
+        inverseBindPoseMatrices[i] = glm::inverse(bindPoseMatrices[i]);
+    }
 
     // GLFW 초기화
     if (!glfwInit()) {
@@ -438,7 +468,7 @@ int main()
         return -1;
     }
 
-    cout << "OpenGL 버전: " << glGetString(GL_VERSION) << endl;
+    cerr << "OpenGL 버전: " << glGetString(GL_VERSION) << endl;
 
     string pmxFolder = filesystem::path(pmxPath).parent_path().string();
     LoadTextures(model, pmxFolder);
@@ -618,7 +648,6 @@ int main()
         glUniform1i(glGetUniformLocation(shader.ID, "sphereTex"), 2);
 
         // 이전 프레임 상태 초기화
-        vector<glm::mat4> boneMatrices(512, glm::mat4(1.0f));
         copy(originalMaterials.begin(), originalMaterials.end(), model.materials.get());
         gVertices = originalVertices;
 
@@ -627,51 +656,35 @@ int main()
         int currentFrame = static_cast<int>(time * 30.0f); // 30fps
 
         // 본 프레임 적용
-        for (const auto& bone : motion->bone_frames) {
-            if (bone.frame > currentFrame) continue;
-            std::string boneName;
-            oguna::EncodingConverter converter;
-            converter.Cp932ToUtf8(bone.name.c_str(), static_cast<int>(bone.name.length()), &boneName);
-
-            BonePose pose;
-            pose.position = glm::vec3(bone.position[0], bone.position[1], bone.position[2]);
-            pose.rotation = glm::quat(bone.orientation[3], bone.orientation[0], bone.orientation[1], bone.orientation[2]);
-            bonePoses[boneName] = pose;
-        }
+        std::vector<glm::mat4> localMatrices(model.bone_count);
         for (int i = 0; i < model.bone_count; ++i) {
             const auto& bone = model.bones[i];
+
             glm::vec3 t(bone.position[0], bone.position[1], bone.position[2]);
-            glm::quat r(1, 0, 0, 0);
+            glm::quat r = glm::quat(1, 0, 0, 0);
 
-            std::string boneName;
-            oguna::EncodingConverter converter;
-            converter.Utf16ToUtf8(bone.bone_name.c_str(), static_cast<int>(bone.bone_name.length()), &boneName);
-
-            auto it = bonePoses.find(boneName);
-            if (it != bonePoses.end()) {
-                const auto& delta = it->second;
-
-                if (bone.parent_index >= 0 && bone.parent_index < model.bone_count) {
-                    glm::vec3 parentT(model.bones[bone.parent_index].position[0],
-                        model.bones[bone.parent_index].position[1],
-                        model.bones[bone.parent_index].position[2]);
-                    t += delta.position - parentT;
-                }
-                else {
-                    t += delta.position;
-                }
-
-                r = delta.rotation;
+            if (i == 11) {
+                r = glm::angleAxis(glm::radians(test), glm::vec3(0, 0, 1));
             }
 
-            boneMatrices[i] = glm::translate(glm::mat4(1.0f), t) * glm::toMat4(r);
+            localMatrices[i] = glm::translate(glm::mat4(1.0f), t) * glm::toMat4(r);
         }
+        std::vector<glm::mat4> boneMatrices(model.bone_count);
         for (int i = 0; i < model.bone_count; ++i) {
             int parent = model.bones[i].parent_index;
-            if (parent >= 0 && parent < model.bone_count) {
-                boneMatrices[i] = boneMatrices[parent] * boneMatrices[i];
+            if (parent >= 0) {
+                boneMatrices[i] = boneMatrices[parent] * localMatrices[i];
+            }
+            else {
+                boneMatrices[i] = localMatrices[i];
             }
         }
+        std::vector<glm::mat4> skinMatrices(model.bone_count);
+        for (int i = 0; i < model.bone_count; ++i) {
+            skinMatrices[i] = boneMatrices[i] * inverseBindPoseMatrices[i];
+        }
+        GLint loc = glGetUniformLocation(shader.ID, "skinMatrices");
+        glUniformMatrix4fv(loc, 512, GL_FALSE, glm::value_ptr(skinMatrices[0]));
 
         // 모프 프레임 적용
         for (const auto& face : motion->face_frames) {
@@ -684,17 +697,11 @@ int main()
         for (const auto& [name, weight] : morphWeights) {
             int morphIndex = FindMorphIndexByName(model, name);
             if (morphIndex >= 0) {
-                ApplyMorph(model, gVertices, boneMatrices, morphIndex, weight);
+                ApplyMorph(model, gVertices, skinMatrices, morphIndex, weight);
             }
         }
-
-        // VBO 갱신
         glBindBuffer(GL_ARRAY_BUFFER, vbo);
         glBufferData(GL_ARRAY_BUFFER, gVertices.size() * sizeof(GLVertex), gVertices.data(), GL_STATIC_DRAW);
-
-        // 본 행렬 전달
-        GLint loc = glGetUniformLocation(shader.ID, "boneMatrices");
-        glUniformMatrix4fv(loc, 512, GL_FALSE, glm::value_ptr(boneMatrices[0]));
 
         // 🔽 모델 그리기 (VAO 바인딩 및 그리기)
         glBindVertexArray(vao);
