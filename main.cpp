@@ -15,6 +15,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 #include <glm/gtx/quaternion.hpp>
+#include <glm/gtx/string_cast.hpp>
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
@@ -60,7 +61,7 @@ void LoadTextures(const pmx::PmxModel& model, const string& pmxBaseDir) {
         int w, h, channels;
         stbi_uc* data = stbi_load(texPath.string().c_str(), &w, &h, &channels, STBI_rgb_alpha);
         if (!data) {
-            cerr << "텍스처 로딩 실패: " << texPath << "\n";
+            wcerr << "텍스처 로딩 실패: " << texPath << "\n";
             continue;
         }
 
@@ -210,6 +211,12 @@ float BezierInterpolate(const char curve[4], float t) {
     return bezier(mid, 0.0f, y1, y2, 1.0f);
 }
 
+void SolveIK(const pmx::PmxBone& ikBone, const pmx::PmxBone* bones, int boneCount,
+    std::vector<glm::mat4>& localMatrices)
+{
+
+}
+
 class Shader {
 public:
     GLuint ID;
@@ -317,34 +324,34 @@ void CursorPosCallback(GLFWwindow* window, double xpos, double ypos)
     }
 }
 
-vector<string> FindAllPMXFiles(const string& folderPath) {
-    vector<string> result;
+vector<wstring> FindAllPMXFiles(const wstring& folderPath) {
+    vector<wstring> result;
 
     if (!filesystem::exists(folderPath) || !filesystem::is_directory(folderPath)) {
-        cerr << "폴더가 존재하지 않거나 디렉토리가 아닙니다: " << folderPath << "\n";
+        wcerr << "폴더가 존재하지 않거나 디렉토리가 아닙니다: " << folderPath << "\n";
         return result;
     }
 
     for (const auto& entry : filesystem::recursive_directory_iterator(folderPath)) {
         if (entry.is_regular_file() && entry.path().extension() == ".pmx") {
-            result.push_back(entry.path().string());
+            result.push_back(entry.path().wstring());
         }
     }
 
     return result;
 }
 
-vector<string> FindAllVMDFiles(const string& folderPath) {
-    vector<string> result;
+vector<wstring> FindAllVMDFiles(const wstring& folderPath) {
+    vector<wstring> result;
 
     if (!filesystem::exists(folderPath) || !filesystem::is_directory(folderPath)) {
-        cerr << "폴더가 존재하지 않거나 디렉토리가 아닙니다: " << folderPath << "\n";
+        wcerr << L"폴더가 존재하지 않거나 디렉토리가 아닙니다: " << folderPath << "\n";
         return result;
     }
 
     for (const auto& entry : filesystem::recursive_directory_iterator(folderPath)) {
         if (entry.is_regular_file() && entry.path().extension() == ".vmd") {
-            result.push_back(entry.path().string());
+            result.push_back(entry.path().wstring());
         }
     }
 
@@ -353,61 +360,61 @@ vector<string> FindAllVMDFiles(const string& folderPath) {
 
 int main()
 {
-    _setmode(_fileno(stdout), _O_U16TEXT);
+    _setmode(_fileno(stderr), _O_U16TEXT);
 
-    string modelFolder = "C:/Users/Ha Yechan/Desktop/PMXViewer/models";
-    vector<string> pmxFiles = FindAllPMXFiles(modelFolder);
+    wstring modelFolder = L"C:/Users/Ha Yechan/Desktop/PMXViewer/models";
+    vector<wstring> pmxFiles = FindAllPMXFiles(modelFolder);
 
     if (pmxFiles.empty()) {
-        cerr << "모델 폴더에 .pmx 파일이 없습니다: " << modelFolder << "\n";
+        wcerr << L"모델 폴더에 .pmx 파일이 없습니다: " << modelFolder << "\n";
         return 1;
     }
 
     // 목록 출력
-    cerr << "[ PMX 모델 목록 ]\n";
+    wcerr << L"[ PMX 모델 목록 ]\n";
     for (size_t i = 0; i < pmxFiles.size(); ++i) {
-        cerr << i << ": " << pmxFiles[i] << "\n";
+        wcerr << i << ": " << pmxFiles[i] << "\n";
     }
 
     // 선택 입력
     int selected = -1;
-    cerr << "\n불러올 모델 번호를 입력하세요: ";
+    wcerr << L"\n불러올 모델 번호를 입력하세요: ";
     cin >> selected;
 
     if (selected < 0 || selected >= static_cast<int>(pmxFiles.size())) {
-        cerr << "잘못된 선택입니다.\n";
+        wcerr << L"잘못된 선택입니다.\n";
         return 1;
     }
 
-    string pmxPath = pmxFiles[selected];
-    cerr << "선택된 PMX 파일: " << pmxPath << "\n";
+    wstring pmxPath = pmxFiles[selected];
+    wcerr << L"선택된 PMX 파일: " << pmxPath << "\n";
 
-    string vmdFolder = "C:/Users/Ha Yechan/Desktop/PMXViewer/motions";
-    vector<string> vmdFiles = FindAllVMDFiles(vmdFolder); // 확장자 필터링 함수 개선 권장
+    wstring vmdFolder = L"C:/Users/Ha Yechan/Desktop/PMXViewer/motions";
+    vector<wstring> vmdFiles = FindAllVMDFiles(vmdFolder); // 확장자 필터링 함수 개선 권장
 
     if (vmdFiles.empty()) {
-        cerr << "모델 폴더에 .vmd 파일이 없습니다: " << modelFolder << "\n";
+        wcerr << L"모델 폴더에 .vmd 파일이 없습니다: " << modelFolder << "\n";
         return 1;
     }
 
-    cerr << "\n[ VMD 파일 목록 ]\n";
+    wcerr << L"\n[ VMD 파일 목록 ]\n";
     for (size_t i = 0; i < vmdFiles.size(); ++i) {
-        cerr << i << ": " << vmdFiles[i] << "\n";
+        wcerr << i << L": " << vmdFiles[i] << "\n";
     }
 
     int vmdSelected = -1;
-    cerr << "\n불러올 VMD 번호를 입력하세요: ";
+    wcerr << L"\n불러올 VMD 번호를 입력하세요: ";
     cin >> vmdSelected;
 
     if (vmdSelected < 0 || vmdSelected >= static_cast<int>(vmdFiles.size())) {
-        cerr << "잘못된 선택입니다.\n";
+        wcerr << L"잘못된 선택입니다.\n";
         return 1;
     }
 
     unique_ptr<vmd::VmdMotion> motion;
     motion = vmd::VmdMotion::LoadFromFile(vmdFiles[vmdSelected].c_str());
     if (!motion) {
-        cerr << "VMD 로딩 실패!\n";
+        wcerr << L"VMD 로딩 실패!\n";
         return 1;
     }
     // 이후 루프에서 이 `motion`을 사용
@@ -427,7 +434,7 @@ int main()
 
     // GLFW 초기화
     if (!glfwInit()) {
-        cerr << "GLFW 초기화 실패!\n";
+        wcerr << L"GLFW 초기화 실패!\n";
         return -1;
     }
 
@@ -443,7 +450,7 @@ int main()
     // 창 생성
     GLFWwindow* window = glfwCreateWindow(800, 600, "OpenGL 테스트 - PMXViewer", nullptr, nullptr);
     if (!window) {
-        cerr << "윈도우 생성 실패!\n";
+        wcerr << L"윈도우 생성 실패!\n";
         glfwTerminate();
         return -1;
     }
@@ -455,11 +462,11 @@ int main()
 
     // GLAD 초기화
     if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
-        cerr << "GLAD 초기화 실패!\n";
+        wcerr << L"GLAD 초기화 실패!\n";
         return -1;
     }
 
-    cerr << "OpenGL 버전: " << glGetString(GL_VERSION) << endl;
+    wcerr << L"OpenGL 버전: " << glGetString(GL_VERSION) << endl;
 
     string pmxFolder = filesystem::path(pmxPath).parent_path().string();
     LoadTextures(model, pmxFolder);
@@ -608,6 +615,8 @@ int main()
     for (int i = 0; i < model.morph_count; ++i)
         morphNameToIndex[model.morphs[i].morph_name] = i;
 
+    static float footOffsetY = 0.0f;
+    static float footOffsetX = 0.0f;
     // 루프
     while (!glfwWindowShouldClose(window)) {
         // 현재 시간 기반 프레임 계산
@@ -622,18 +631,56 @@ int main()
         bonePoses.clear();
         for (const auto& [name, frames] : boneKeyframes) {
             if (frames.empty()) continue;
-            int idx = -1;
+            int prev = -1, next = -1;
             for (int i = 0; i < frames.size(); ++i) {
-                if (frames[i]->frame > currentFrame) break;
-                idx = i;
+                if (frames[i]->frame > currentFrame) {
+                    next = i;
+                    break;
+                }
+                prev = i;
             }
-            if (idx >= 0) {
-                const auto* f = frames[idx];
-                glm::vec3 pos(f->position[0], f->position[1], f->position[2]);
-                glm::quat rot(f->orientation[3], f->orientation[0], f->orientation[1], f->orientation[2]);
-                bonePoses[name] = { pos, rot };
-            }
+
+            if (prev < 0 || next < 0) continue;
+            const auto* f1 = frames[prev];
+            const auto* f2 = frames[next];
+            float rawT = (currentFrame - f1->frame) / float(f2->frame - f1->frame);
+
+            // 보간 곡선 적용
+            float tx = BezierInterpolate(f1->interpolation[0][0], rawT);
+            float ty = BezierInterpolate(f1->interpolation[1][0], rawT);
+            float tz = BezierInterpolate(f1->interpolation[2][0], rawT);
+            float tr = BezierInterpolate(f1->interpolation[3][0], rawT);
+
+            glm::vec3 p1(f1->position[0], f1->position[1], f1->position[2]);
+            glm::vec3 p2(f2->position[0], f2->position[1], f2->position[2]);
+            glm::vec3 pos = glm::vec3(
+                glm::mix(p1.x, p2.x, tx),
+                glm::mix(p1.y, p2.y, ty),
+                glm::mix(p1.z, p2.z, tz)
+            );
+
+            glm::quat q1(f1->orientation[3], f1->orientation[0], f1->orientation[1], f1->orientation[2]);
+            glm::quat q2(f2->orientation[3], f2->orientation[0], f2->orientation[1], f2->orientation[2]);
+            glm::quat rot = glm::slerp(q1, q2, tr);
+
+            BonePose pose;
+            pose.position = pos;
+            pose.orientation = rot;
+            memcpy(pose.interpolation, f1->interpolation, sizeof(char) * 4 * 4 * 4); // optional
+
+            bonePoses[name] = pose;
         }
+
+        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) footOffsetY += 0.5f;
+        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) footOffsetY -= 0.5f;
+        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) footOffsetX += 0.5f;
+        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) footOffsetX -= 0.5f;
+        const auto& bone = model.bones[46];
+        BonePose pose;
+        pose.position = glm::vec3(footOffsetX, footOffsetY, 0.0f);
+        pose.orientation = glm::quat(1, 0, 0, 0);
+        bonePoses[bone.bone_name] = pose;
+
         for (int i = 0; i < model.bone_count; ++i) {
             const auto& bone = model.bones[i];
             glm::vec3 pivot(bone.position[0], bone.position[1], bone.position[2]);
@@ -670,16 +717,28 @@ int main()
             }
         }
 
+        // IK 처리 시작
+        for (int i = 0; i < model.bone_count; ++i) {
+            const auto& bone = model.bones[i];
+            if (bone.bone_flag & 0x20 /* IK 플래그 */) {
+                SolveIK(bone, model.bones.get(), model.bone_count, localMatrices);
+            }
+        }
+
         // 부모 행렬 적용
         for (int i = 0; i < model.bone_count; ++i) {
             int parent = model.bones[i].parent_index;
-            if (parent >= 0) {
+            if (parent >= 0)
                 boneMatrices[i] = boneMatrices[parent] * localMatrices[i];
-            }
-            else {
+            else
                 boneMatrices[i] = localMatrices[i];
-            }
         }
+
+        GLint loc = glGetUniformLocation(shader.ID, "boneMatrices");
+        glUniformMatrix4fv(loc, 512, GL_FALSE, glm::value_ptr(boneMatrices[0]));
+
+        glBindBuffer(GL_ARRAY_BUFFER, vbo);
+        glBufferData(GL_ARRAY_BUFFER, gVertices.size() * sizeof(GLVertex), gVertices.data(), GL_STATIC_DRAW);
 
         // 배경색 지정 및 지우기
         glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
@@ -730,13 +789,6 @@ int main()
         glUniform1i(glGetUniformLocation(shader.ID, "tex"), 0);
         glUniform1i(glGetUniformLocation(shader.ID, "toonTex"), 1);
         glUniform1i(glGetUniformLocation(shader.ID, "sphereTex"), 2);
-
-       
-        GLint loc = glGetUniformLocation(shader.ID, "boneMatrices");
-        glUniformMatrix4fv(loc, 512, GL_FALSE, glm::value_ptr(boneMatrices[0]));
-
-        glBindBuffer(GL_ARRAY_BUFFER, vbo);
-        glBufferData(GL_ARRAY_BUFFER, gVertices.size() * sizeof(GLVertex), gVertices.data(), GL_STATIC_DRAW);
 
         // 🔽 모델 그리기 (VAO 바인딩 및 그리기)
         glBindVertexArray(vao);

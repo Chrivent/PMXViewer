@@ -208,7 +208,7 @@ namespace vmd
 		/// IKフレーム
 		std::vector<VmdIkFrame> ik_frames;
 
-		static std::unique_ptr<VmdMotion> LoadFromFile(char const *filename)
+		static std::unique_ptr<VmdMotion> LoadFromFile(const std::wstring& filename)
 		{
 			std::ifstream stream(filename, std::ios::binary);
 			auto result = LoadFromStream(&stream);
