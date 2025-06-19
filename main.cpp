@@ -676,10 +676,7 @@ int main()
         if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) footOffsetX += 0.5f;
         if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) footOffsetX -= 0.5f;
         const auto& bone = model.bones[46];
-        BonePose pose;
-        pose.position = glm::vec3(footOffsetX, footOffsetY, 0.0f);
-        pose.orientation = glm::quat(1, 0, 0, 0);
-        bonePoses[bone.bone_name] = pose;
+        bonePoses[bone.bone_name].position = glm::vec3(footOffsetX, footOffsetY, 0.0f);
 
         for (int i = 0; i < model.bone_count; ++i) {
             const auto& bone = model.bones[i];
