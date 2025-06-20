@@ -250,10 +250,6 @@ int main()
     }
     wcerr << L"OpenGL 버전: " << glGetString(GL_VERSION) << endl;
 
-    glEnable(GL_DEPTH_TEST);
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
     /* ---- ③ PMXActor 생성·초기화 ---- */
     PMXActor actor;
     if (!actor.Initialize(model, fs::path(pmxPath), motion.get())) {

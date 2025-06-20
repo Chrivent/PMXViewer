@@ -58,22 +58,30 @@ uniform vec3  kAmb;
 uniform vec3  uLightDir;
 uniform vec3  uEye;
 
-void main(){
-    vec3  base = texture(uTex, fs.uv).rgb;
-    vec3  N    = normalize(fs.nrmW);
-    vec3  L    = normalize(-uLightDir);
-    vec3  V    = normalize(fs.viewW);
-    vec3  H    = normalize(L + V);
+uniform bool  bUseToon;
 
-    float NdotL   = clamp(dot(N, L), 0.0, 1.0);
-    vec3  toonCol = texture(uToon, vec2(0.0, 1.0 - NdotL)).rgb;
-    vec3  diffCol = base * toonCol;
+void main(){
+    vec3 base = texture(uTex, fs.uv).rgb * kDiffuse.rgb;
+
+    vec3 N = normalize(fs.nrmW);
+    vec3 L = normalize(-uLightDir);
+    vec3 V = normalize(fs.viewW);
+    vec3 H = normalize(L + V);
+
+    float NdotL = clamp(dot(N, L), 0.0, 1.0);
+    vec3 toonCol = bUseToon
+        ? texture(uToon, vec2(0.0, 1.0 - NdotL)).rgb
+        : vec3(1.0);
+
+    vec3 diffCol = base * toonCol;
 
     float specB = pow(max(dot(N, H), 0.0), kSpec.w);
-    vec3  specCol = kSpec.rgb * specB;
+    vec3 specCol = kSpec.rgb * specB;
 
-    vec3  finalRgb = diffCol + specCol + kAmb.rgb * base;
-    FragColor     = vec4(finalRgb, kDiffuse.a);
+    vec3 ambCol = base + clamp(kAmb, vec3(0.0), vec3(0.5)) - vec3(0.5);
+    vec3 finalRgb = diffCol + specCol + ambCol;
+
+    FragColor = vec4(finalRgb, kDiffuse.a);
 }
 )GLSL";
 
@@ -199,10 +207,9 @@ bool PMXActor::Initialize(const pmx::PmxModel& m, const fs::path& pmxPath, const
     glNamedBufferStorage(mUBOTransform,
         sizeof(glm::mat4) * m.bone_count, nullptr, GL_DYNAMIC_STORAGE_BIT);
 
+    glEnable(GL_DEPTH_TEST);
     glEnable(GL_BLEND);
-    glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA,  // Color
-        GL_ONE, GL_ZERO);                      // Alpha
-    glBlendEquation(GL_FUNC_ADD);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
     return true;
 }
@@ -215,34 +222,32 @@ void PMXActor::Update(float dt) {
 }
 
 /* ---------- Draw ---------- */
-void PMXActor::Draw(const glm::mat4& view, const glm::mat4& proj, const glm::vec3& eye, const glm::vec3& lightDir)const {
+void PMXActor::Draw(const glm::mat4& view, const glm::mat4& proj, const glm::vec3& eye, const glm::vec3& lightDir) const {
     glUseProgram(mProgram);
-    glProgramUniform3fv(mProgram,
-        glGetUniformLocation(mProgram, "uEye"), 1, &eye.x);
-    glProgramUniform3fv(mProgram,
-        glGetUniformLocation(mProgram, "uLightDir"), 1, &lightDir.x);
+    glProgramUniform3fv(mProgram, glGetUniformLocation(mProgram, "uEye"), 1, &eye.x);
+    glProgramUniform3fv(mProgram, glGetUniformLocation(mProgram, "uLightDir"), 1, &lightDir.x);
     glm::mat4 vp = proj * view;
-    glUniformMatrix4fv(glGetUniformLocation(mProgram, "uVP"),
-        1, GL_FALSE, &vp[0][0]);
+    glUniformMatrix4fv(glGetUniformLocation(mProgram, "uVP"), 1, GL_FALSE, &vp[0][0]);
 
     glBindVertexArray(mVAO);
     glBindBufferBase(GL_UNIFORM_BUFFER, 0, mUBOTransform);
+
     for (auto& s : mSubmeshes) {
         const auto& mt = mMaterials[s.mat];
-        float diff[4] = { mt.diffuse[0],  mt.diffuse[1],
-                          mt.diffuse[2],  mt.diffuse[3] };
-        float spec[4] = { mt.specular[0], mt.specular[1],
-                          mt.specular[2], mt.specularlity };
-        float amb[3] = { mt.ambient[0],  mt.ambient[1],
-                          mt.ambient[2] };
+        float diff[4] = { mt.diffuse[0],  mt.diffuse[1], mt.diffuse[2], mt.diffuse[3] };
+        float spec[4] = { mt.specular[0], mt.specular[1], mt.specular[2], mt.specularlity };
+        float amb[3] = { mt.ambient[0],  mt.ambient[1],  mt.ambient[2] };
         glProgramUniform4fv(mProgram, locDiff, 1, diff);
         glProgramUniform4fv(mProgram, locSpec, 1, spec);
         glProgramUniform3fv(mProgram, locAmb, 1, amb);
-
         glBindTextureUnit(2, mTextures[s.mat]);
-        glBindTextureUnit(3, mToonTextures[s.mat]);
-        glDrawElementsBaseVertex(GL_TRIANGLES, s.cnt, GL_UNSIGNED_INT,
-            (void*)(sizeof(uint32_t) * s.ofs), 0);
+        bool hasToon = mToonTextures[s.mat] != 0;
+        glUniform1i(glGetUniformLocation(mProgram, "bUseToon"), hasToon);
+        if (hasToon)
+            glBindTextureUnit(3, mToonTextures[s.mat]);
+        else
+            glBindTextureUnit(3, 0);
+        glDrawElementsBaseVertex(GL_TRIANGLES, s.cnt, GL_UNSIGNED_INT, (void*)(sizeof(uint32_t) * s.ofs), 0);
     }
 }
 
