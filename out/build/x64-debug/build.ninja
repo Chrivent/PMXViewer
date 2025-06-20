@@ -67,6 +67,15 @@ build CMakeFiles\PMXViewer.dir\Pmx.cpp.obj: CXX_COMPILER__PMXViewer_unscanned_De
   TARGET_COMPILE_PDB = CMakeFiles\PMXViewer.dir\
   TARGET_PDB = PMXViewer.pdb
 
+build CMakeFiles\PMXViewer.dir\PMXActor.cpp.obj: CXX_COMPILER__PMXViewer_unscanned_Debug C$:\Users\Ha$ Yechan\Desktop\PMXViewer\PMXActor.cpp || cmake_object_order_depends_target_PMXViewer
+  DEFINES = -DGLFW_DLL
+  FLAGS = /DWIN32 /D_WINDOWS /W3 /GR /EHsc /MDd /Zi /Ob0 /Od /RTC1 -std:c++20
+  INCLUDES = -external:IC:\vcpkg\installed\x64-windows\include -external:W0
+  OBJECT_DIR = CMakeFiles\PMXViewer.dir
+  OBJECT_FILE_DIR = CMakeFiles\PMXViewer.dir
+  TARGET_COMPILE_PDB = CMakeFiles\PMXViewer.dir\
+  TARGET_PDB = PMXViewer.pdb
+
 
 # =============================================================================
 # Link build statements for EXECUTABLE target PMXViewer
@@ -75,7 +84,7 @@ build CMakeFiles\PMXViewer.dir\Pmx.cpp.obj: CXX_COMPILER__PMXViewer_unscanned_De
 #############################################
 # Link the executable PMXViewer.exe
 
-build PMXViewer.exe: CXX_EXECUTABLE_LINKER__PMXViewer_Debug CMakeFiles\PMXViewer.dir\main.cpp.obj CMakeFiles\PMXViewer.dir\Pmx.cpp.obj | C$:\vcpkg\installed\x64-windows\debug\lib\glfw3dll.lib C$:\vcpkg\installed\x64-windows\debug\lib\glad.lib C$:\vcpkg\installed\x64-windows\debug\lib\glm.lib
+build PMXViewer.exe: CXX_EXECUTABLE_LINKER__PMXViewer_Debug CMakeFiles\PMXViewer.dir\main.cpp.obj CMakeFiles\PMXViewer.dir\Pmx.cpp.obj CMakeFiles\PMXViewer.dir\PMXActor.cpp.obj | C$:\vcpkg\installed\x64-windows\debug\lib\glfw3dll.lib C$:\vcpkg\installed\x64-windows\debug\lib\glad.lib C$:\vcpkg\installed\x64-windows\debug\lib\glm.lib
   FLAGS = /DWIN32 /D_WINDOWS /W3 /GR /EHsc /MDd /Zi /Ob0 /Od /RTC1
   LINK_FLAGS = /machine:x64 /debug /INCREMENTAL /subsystem:console
   LINK_LIBRARIES = C:\vcpkg\installed\x64-windows\debug\lib\glfw3dll.lib  C:\vcpkg\installed\x64-windows\debug\lib\glad.lib  C:\vcpkg\installed\x64-windows\debug\lib\glm.lib  kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib

@@ -9,6 +9,8 @@
 
 #include "Pmx.h"
 #include "Vmd.h"
+#include "IKSolver.h"
+#include "PMXActor.h"    
 
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/glm.hpp>
@@ -25,18 +27,7 @@
 
 using namespace std;
 
-struct GLVertex {
-    glm::vec3 position = glm::vec3();
-    glm::vec3 normal = glm::vec3();
-    glm::vec2 uv = glm::vec2();
-    glm::ivec4 boneIndices = glm::ivec4(0);
-    glm::vec4 boneWeights = glm::vec4(0.0f);
-};
-
 GLuint vao, vbo, ebo;
-vector<GLVertex> gVertices;
-vector<uint32_t> gIndices;
-vector<GLuint> gTextures;
 
 float cameraDistance = 10.0f;
 float yaw = 0.0f;
@@ -50,216 +41,6 @@ glm::vec3 cameraTarget = glm::vec3(0, 5, 0);
 float lightYaw = -45.0f;   // 초기 조명 방향 (degree)
 float lightPitch = 45.0f;
 bool leftMouseDown = false;
-
-void LoadTextures(const pmx::PmxModel& model, const string& pmxBaseDir) {
-    gTextures.resize(model.texture_count, 0);
-
-    for (int i = 0; i < model.texture_count; ++i) {
-        string relPath(model.textures[i].begin(), model.textures[i].end()); // wstring → string
-        filesystem::path texPath = filesystem::path(pmxBaseDir) / relPath;
-
-        int w, h, channels;
-        stbi_uc* data = stbi_load(texPath.string().c_str(), &w, &h, &channels, STBI_rgb_alpha);
-        if (!data) {
-            wcerr << "텍스처 로딩 실패: " << texPath << "\n";
-            continue;
-        }
-
-        GLuint texID;
-        glGenTextures(1, &texID);
-        glBindTexture(GL_TEXTURE_2D, texID);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
-        glGenerateMipmap(GL_TEXTURE_2D);
-
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-
-        gTextures[i] = texID;
-        stbi_image_free(data);
-    }
-}
-
-void ApplyMorph(const pmx::PmxModel& model, vector<GLVertex>& vertices, vector<glm::mat4>& transformMatrices, int morphIndex, float weight) {
-    if (morphIndex < 0 || morphIndex >= model.morph_count) return;
-
-    const auto& morph = model.morphs[morphIndex];
-
-    switch (morph.morph_type) {
-    case pmx::MorphType::Vertex:
-        for (int i = 0; i < morph.offset_count; ++i) {
-            const auto& offset = morph.vertex_offsets[i];
-            int vi = offset.vertex_index;
-            if (vi < 0 || vi >= static_cast<int>(vertices.size())) continue;
-
-            vertices[vi].position += glm::vec3(
-                offset.position_offset[0],
-                offset.position_offset[1],
-                offset.position_offset[2]
-            ) * weight;
-        }
-        break;
-
-    case pmx::MorphType::UV:
-    case pmx::MorphType::AdditionalUV1:
-    case pmx::MorphType::AdditionalUV2:
-    case pmx::MorphType::AdditionalUV3:
-    case pmx::MorphType::AdditionalUV4:
-        for (int i = 0; i < morph.offset_count; ++i) {
-            const auto& offset = morph.uv_offsets[i];
-            int vi = offset.vertex_index;
-            if (vi < 0 || vi >= static_cast<int>(vertices.size())) continue;
-
-            vertices[vi].uv += glm::vec2(
-                offset.uv_offset[0],
-                offset.uv_offset[1]
-            ) * weight;
-        }
-        break;
-
-    case pmx::MorphType::Matrial:
-        for (int i = 0; i < morph.offset_count; ++i) {
-            const auto& offset = morph.material_offsets[i];
-            int mi = offset.material_index;
-            if (mi < 0 || mi >= model.material_count) continue;
-
-            auto& mat = model.materials[mi];
-            uint8_t op = offset.offset_operation;
-
-            auto apply = [&](float* dst, const float* off, int len) {
-                for (int j = 0; j < len; ++j) {
-                    if (op == 0) // Mul
-                        dst[j] *= (1.0f + off[j] * weight);  // 안정적 처리
-                    else         // Add
-                        dst[j] += off[j] * weight;
-                }
-                };
-
-            apply(mat.diffuse, offset.diffuse, 4);
-            apply(mat.specular, offset.specular, 3);
-            mat.specularlity += offset.specularity * weight;
-            apply(mat.ambient, offset.ambient, 3);
-            apply(mat.edge_color, offset.edge_color, 4);
-            mat.edge_size += offset.edge_size * weight;
-        }
-        break;
-
-    case pmx::MorphType::Bone:
-        for (int i = 0; i < morph.offset_count; ++i) {
-            const auto& offset = morph.bone_offsets[i];
-            int bi = offset.bone_index;
-            if (bi < 0 || bi >= static_cast<int>(transformMatrices.size())) continue;
-
-            const auto& bone = model.bones[bi];
-            glm::vec3 pivot(bone.position[0], bone.position[1], bone.position[2]);
-
-            glm::vec3 t(offset.translation[0], offset.translation[1], offset.translation[2]);
-            glm::quat r(offset.rotation[3], offset.rotation[0], offset.rotation[1], offset.rotation[2]); // wxyz
-
-            // 보간된 트랜스폼
-            glm::mat4 trans = glm::translate(glm::mat4(1.0f), t * weight);
-            glm::mat4 rot = glm::toMat4(glm::slerp(glm::quat(), r, weight));
-
-            // 피벗 기준으로 회전·이동 적용: Tpivot * (T * R) * Tinv
-            glm::mat4 morphMat = glm::translate(glm::mat4(1.0f), pivot)
-                * trans * rot
-                * glm::translate(glm::mat4(1.0f), -pivot);
-
-            // 기존 local 행렬에 적용
-            transformMatrices[bi] = morphMat * transformMatrices[bi];
-        }
-        break;
-
-    case pmx::MorphType::Group:
-        for (int i = 0; i < morph.offset_count; ++i) {
-            const auto& group = morph.group_offsets[i];
-            ApplyMorph(model, vertices, transformMatrices, group.morph_index, group.morph_weight * weight);
-        }
-        break;
-
-    default:
-        break;
-    }
-}
-
-float BezierInterpolate(const char curve[4], float t) {
-    float x1 = curve[0] / 127.0f;
-    float x2 = curve[1] / 127.0f;
-    float y1 = curve[2] / 127.0f;
-    float y2 = curve[3] / 127.0f;
-
-    // Cubic Bezier: P0=0, P1=(x1,y1), P2=(x2,y2), P3=1
-    auto bezier = [](float t, float p0, float p1, float p2, float p3) {
-        float it = 1.0f - t;
-        return it * it * it * p0 +
-            3.0f * it * it * t * p1 +
-            3.0f * it * t * t * p2 +
-            t * t * t * p3;
-        };
-
-    // Newton-Raphson to find time t' where bezier(t').x ≈ t
-    float left = 0.0f, right = 1.0f;
-    float mid = 0.5f;
-    for (int i = 0; i < 5; ++i) {
-        float x = bezier(mid, 0.0f, x1, x2, 1.0f);
-        if (x < t) left = mid;
-        else       right = mid;
-        mid = (left + right) * 0.5f;
-    }
-
-    return bezier(mid, 0.0f, y1, y2, 1.0f);
-}
-
-void SolverIK(const pmx::PmxBone& ikBone, const pmx::PmxBone* bones, int boneCount, std::vector<glm::mat4>& transformMatrices)
-{
-
-}
-
-class Shader {
-public:
-    GLuint ID;
-
-    Shader(const char* vertexPath, const char* fragmentPath) {
-        string vertexCode;
-        string fragmentCode;
-        ifstream vShaderFile(vertexPath);
-        ifstream fShaderFile(fragmentPath);
-
-        stringstream vShaderStream, fShaderStream;
-        vShaderStream << vShaderFile.rdbuf();
-        fShaderStream << fShaderFile.rdbuf();
-        vertexCode = vShaderStream.str();
-        fragmentCode = fShaderStream.str();
-
-        const char* vCode = vertexCode.c_str();
-        const char* fCode = fragmentCode.c_str();
-
-        GLuint vertex = glCreateShader(GL_VERTEX_SHADER);
-        glShaderSource(vertex, 1, &vCode, NULL);
-        glCompileShader(vertex);
-
-        GLuint fragment = glCreateShader(GL_FRAGMENT_SHADER);
-        glShaderSource(fragment, 1, &fCode, NULL);
-        glCompileShader(fragment);
-
-        ID = glCreateProgram();
-        glAttachShader(ID, vertex);
-        glAttachShader(ID, fragment);
-        glLinkProgram(ID);
-
-        glDeleteShader(vertex);
-        glDeleteShader(fragment);
-    }
-
-    void use() const {
-        glUseProgram(ID);
-    }
-
-    void setMat4(const string& name, const glm::mat4& mat) const {
-        glUniformMatrix4fv(glGetUniformLocation(ID, name.c_str()), 1, GL_FALSE, glm::value_ptr(mat));
-    }
-};
 
 // 마우스 휠 콜백
 void ScrollCallback(GLFWwindow* window, double xoffset, double yoffset)
@@ -388,6 +169,10 @@ int main()
     wstring pmxPath = pmxFiles[selected];
     wcerr << L"선택된 PMX 파일: " << pmxPath << "\n";
 
+    pmx::PmxModel model;
+    ifstream file(pmxPath, ios::binary);
+    model.Read(&file);
+
     wstring vmdFolder = L"C:/Users/Ha Yechan/Desktop/PMXViewer/motions";
     vector<wstring> vmdFiles = FindAllVMDFiles(vmdFolder); // 확장자 필터링 함수 개선 권장
 
@@ -416,7 +201,6 @@ int main()
         wcerr << L"VMD 로딩 실패!\n";
         return 1;
     }
-    // 이후 루프에서 이 `motion`을 사용
 
     sort(motion->bone_frames.begin(), motion->bone_frames.end(),
         [](const vmd::VmdBoneFrame& a, const vmd::VmdBoneFrame& b) {
@@ -426,11 +210,6 @@ int main()
         [](const vmd::VmdFaceFrame& a, const vmd::VmdFaceFrame& b) {
             return a.frame < b.frame;
         });
-
-    pmx::PmxModel model;
-    ifstream file(pmxPath, ios::binary);
-    model.Read(&file);
-
     // GLFW 초기화
     if (!glfwInit()) {
         wcerr << L"GLFW 초기화 실패!\n";
@@ -438,23 +217,19 @@ int main()
     }
 
     // OpenGL 버전 3.3 Core 프로파일 사용
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 5);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
 #ifdef _WIN32
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE); // macOS 호환 설정
 #endif
-
     // 창 생성
-    GLFWwindow* window = glfwCreateWindow(800, 600, "OpenGL 테스트 - PMXViewer", nullptr, nullptr);
-    if (!window) {
-        wcerr << L"윈도우 생성 실패!\n";
-        glfwTerminate();
-        return -1;
-    }
-
+    GLFWwindow* window =
+        glfwCreateWindow(800, 600, "PMX Viewer (OpenGL)", nullptr, nullptr);
+    if (!window) { wcerr << L"윈도우 생성 실패!\n"; return -1; }
     glfwMakeContextCurrent(window);
+
     glfwSetScrollCallback(window, ScrollCallback); // 🔸 마우스 휠 콜백 등록
     glfwSetMouseButtonCallback(window, MouseButtonCallback);
     glfwSetCursorPosCallback(window, CursorPosCallback);
@@ -464,381 +239,57 @@ int main()
         wcerr << L"GLAD 초기화 실패!\n";
         return -1;
     }
-
     wcerr << L"OpenGL 버전: " << glGetString(GL_VERSION) << endl;
-
-    string pmxFolder = filesystem::path(pmxPath).parent_path().string();
-    LoadTextures(model, pmxFolder);
-
-    Shader shader("C:/Users/Ha Yechan/Desktop/PMXViewer/shaders/vertex.glsl", "C:/Users/Ha Yechan/Desktop/PMXViewer/shaders/fragment.glsl");
 
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-    // VAO/VBO/EBO 초기화
-    glGenVertexArrays(1, &vao);
-    glGenBuffers(1, &vbo);
-    glGenBuffers(1, &ebo);
-
-    glBindVertexArray(vao);
-
-    for (int i = 0; i < model.vertex_count; ++i) {
-        const auto& src = model.vertices[i];
-        GLVertex v;
-        v.position = glm::vec3(src.position[0], src.position[1], src.position[2]);
-        v.normal = glm::vec3(src.normal[0], src.normal[1], src.normal[2]);
-        v.uv = glm::vec2(src.uv[0], src.uv[1]);
-
-        // 본 웨이트 처리
-        const auto& skin = src.skinning;
-        const auto& type = src.skinning_type;
-
-        int indices[4] = {};
-        float weights[4] = {};
-
-        switch (type) {
-        case pmx::PmxVertexSkinningType::BDEF1: {
-            auto* bdef = static_cast<pmx::PmxVertexSkinningBDEF1*>(skin.get());
-            indices[0] = bdef->bone_index;
-            weights[0] = 1.0f;
-            break;
-        }
-        case pmx::PmxVertexSkinningType::BDEF2: {
-            auto* bdef = static_cast<pmx::PmxVertexSkinningBDEF2*>(skin.get());
-            indices[0] = bdef->bone_index1;
-            indices[1] = bdef->bone_index2;
-            weights[0] = bdef->bone_weight;
-            weights[1] = 1.0f - bdef->bone_weight;
-            break;
-        }
-        case pmx::PmxVertexSkinningType::BDEF4: {
-            auto* bdef = static_cast<pmx::PmxVertexSkinningBDEF4*>(skin.get());
-            indices[0] = bdef->bone_index1;
-            indices[1] = bdef->bone_index2;
-            indices[2] = bdef->bone_index3;
-            indices[3] = bdef->bone_index4;
-            weights[0] = bdef->bone_weight1;
-            weights[1] = bdef->bone_weight2;
-            weights[2] = bdef->bone_weight3;
-            weights[3] = bdef->bone_weight4;
-            break;
-        }
-        case pmx::PmxVertexSkinningType::SDEF: {
-            auto* sdef = static_cast<pmx::PmxVertexSkinningSDEF*>(skin.get());
-            indices[0] = sdef->bone_index1;
-            indices[1] = sdef->bone_index2;
-            weights[0] = sdef->bone_weight;
-            weights[1] = 1.0f - sdef->bone_weight;
-            break;
-        }
-        case pmx::PmxVertexSkinningType::QDEF: {
-            auto* qdef = static_cast<pmx::PmxVertexSkinningQDEF*>(skin.get());
-            indices[0] = qdef->bone_index1;
-            indices[1] = qdef->bone_index2;
-            indices[2] = qdef->bone_index3;
-            indices[3] = qdef->bone_index4;
-            weights[0] = qdef->bone_weight1;
-            weights[1] = qdef->bone_weight2;
-            weights[2] = qdef->bone_weight3;
-            weights[3] = qdef->bone_weight4;
-            break;
-        }
-        }
-
-        for (int j = 0; j < 4; ++j) {
-            v.boneIndices[j] = indices[j];
-            v.boneWeights[j] = weights[j];
-        }
-
-        gVertices.push_back(v);
-    }
-    gIndices.assign(model.indices.get(), model.indices.get() + model.index_count);
-
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    glBufferData(GL_ARRAY_BUFFER, gVertices.size() * sizeof(GLVertex), gVertices.data(), GL_STATIC_DRAW);
-
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, gIndices.size() * sizeof(uint32_t), gIndices.data(), GL_STATIC_DRAW);
-
-    // 속성 연결
-    glEnableVertexAttribArray(0); // position
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(GLVertex), (void*)offsetof(GLVertex, position));
-
-    glEnableVertexAttribArray(1); // normal
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(GLVertex), (void*)offsetof(GLVertex, normal));
-
-    glEnableVertexAttribArray(2); // uv
-    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(GLVertex), (void*)offsetof(GLVertex, uv));
-
-    glEnableVertexAttribArray(3); // boneIndices
-    glVertexAttribIPointer(3, 4, GL_INT, sizeof(GLVertex), (void*)offsetof(GLVertex, boneIndices));
-
-    glEnableVertexAttribArray(4); // boneWeights
-    glVertexAttribPointer(4, 4, GL_FLOAT, GL_FALSE, sizeof(GLVertex), (void*)offsetof(GLVertex, boneWeights));
-
-    glBindVertexArray(0);
-
-    struct BonePose {
-        glm::vec3 position;
-        glm::quat orientation;
-        char interpolation[4][4][4];
-    };
-    unordered_map<wstring, BonePose> bonePoses;
-    unordered_map<wstring, float> morphWeights;
-
-    vector<pmx::PmxMaterial> originalMaterials(
-        model.materials.get(),
-        model.materials.get() + model.material_count
-    );
-    vector<GLVertex> originalVertices = gVertices;
-
-    unordered_map<wstring, vector<const vmd::VmdBoneFrame*>> boneKeyframes;
-    unordered_map<wstring, vector<const vmd::VmdFaceFrame*>> faceKeyframes;
-
-    for (const auto& f : motion->bone_frames) {
-        wstring name;
-        oguna::EncodingConverter{}.Cp932ToUtf16(f.name.c_str(), (int)f.name.length(), &name);
-        boneKeyframes[name].push_back(&f);
-    }
-    for (const auto& f : motion->face_frames) {
-        wstring name;
-        oguna::EncodingConverter{}.Cp932ToUtf16(f.face_name.c_str(), (int)f.face_name.length(), &name);
-        faceKeyframes[name].push_back(&f);
+    /* ---- ③ PMXActor 생성·초기화 ---- */
+    PMXActor actor;
+    if (!actor.Initialize(model, fs::path(pmxPath), motion.get())) {
+        wcerr << L"PMXActor 초기화 실패!\n"; return -1;
     }
 
-    vector<glm::mat4> boneMatrices(model.bone_count);
-    vector<glm::mat4> transformMatrices(model.bone_count);
-
-    unordered_map<wstring, int> morphNameToIndex;
-    for (int i = 0; i < model.morph_count; ++i)
-        morphNameToIndex[model.morphs[i].morph_name] = i;
-
-    static float footOffsetY = 0.0f;
-    static float footOffsetX = 0.0f;
-    // 루프
+    /* ---- ④ 메인 루프 ---- */
+    double last = glfwGetTime();
     while (!glfwWindowShouldClose(window)) {
-        // 배경색 지정 및 지우기
-        glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        /* dt 계산 */
+        double now = glfwGetTime();
+        float dt = static_cast<float>(now - last);
+        last = now;
 
-        // 모델 스케일 적용
-        glm::mat4 scale = glm::scale(glm::mat4(1.0f), glm::vec3(0.3f));
-
-        // 카메라 위치 계산
-        glm::vec3 target = cameraTarget;  // 🔄 수정: 고정값 대신 패닝 반영된 타겟 사용
-
+        /* 카메라 행렬 계산 (기존 코드 재사용) */
+        glm::vec3 target = cameraTarget;
         float yawRad = glm::radians(yaw);
         float pitchRad = glm::radians(pitch);
-        float x = cameraDistance * cos(pitchRad) * sin(yawRad);
-        float y = cameraDistance * sin(pitchRad);
-        float z = cameraDistance * cos(pitchRad) * cos(yawRad);
-        glm::vec3 eye = target + glm::vec3(x, y, z);
+        glm::vec3 eye(
+            cameraDistance* cos(pitchRad)* sin(yawRad),
+            cameraDistance* sin(pitchRad),
+            cameraDistance* cos(pitchRad)* cos(yawRad));
+        eye += target;
 
-        // up 벡터 보정 (위에서 아래로 볼 때 꼬임 방지)
-        glm::vec3 up = glm::vec3(0, 1, 0);
+        glm::vec3 up(0, 1, 0);
         glm::vec3 viewDir = glm::normalize(target - eye);
-        if (abs(glm::dot(viewDir, up)) > 0.99f)
-            up = glm::vec3(0, 0, 1);
+        if (abs(glm::dot(viewDir, up)) > 0.99f) up = glm::vec3(0, 0, 1);
 
         glm::mat4 view = glm::lookAt(eye, target, up);
-        glm::mat4 projection = glm::perspective(glm::radians(45.0f), 800.f / 600.f, 0.1f, 100.f);
+        glm::mat4 proj = glm::perspective(
+            glm::radians(45.0f), 800.f / 600.f, 0.1f, 100.f);
 
-        // 셰이더 바인딩 및 행렬 전달
-        shader.use();
-        shader.setMat4("model", scale);
-        shader.setMat4("view", view);
-        shader.setMat4("projection", projection);
+        /* 업데이트 + 렌더 */
+        actor.Update(dt);
 
-        // ✅ 라이트 방향 계산
-        float lyawRad = glm::radians(lightYaw);
-        float lpitchRad = glm::radians(lightPitch);
-        glm::vec3 lightDir = glm::normalize(glm::vec3(
-            cos(lpitchRad) * sin(lyawRad),
-            sin(lpitchRad),
-            cos(lpitchRad) * cos(lyawRad)
-        ));
-        glUniform3fv(glGetUniformLocation(shader.ID, "lightDir"), 1, glm::value_ptr(lightDir));
+        glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        actor.Draw(view, proj);
 
-        // ✅ 카메라 위치 전달
-        glUniform3fv(glGetUniformLocation(shader.ID, "cameraPos"), 1, glm::value_ptr(eye));
-
-        // 🔽 sampler2D와 텍스처 유닛 연결
-        glUniform1i(glGetUniformLocation(shader.ID, "tex"), 0);
-        glUniform1i(glGetUniformLocation(shader.ID, "toonTex"), 1);
-        glUniform1i(glGetUniformLocation(shader.ID, "sphereTex"), 2);
-
-        // 현재 시간 기반 프레임 계산
-        float time = static_cast<float>(glfwGetTime());
-        int currentFrame = static_cast<int>(time * 30.0f); // 30fps
-
-        // 이전 프레임 상태 초기화
-        copy(originalMaterials.begin(), originalMaterials.end(), model.materials.get());
-        gVertices = originalVertices;
-
-        // 본 프레임 적용
-        bonePoses.clear();
-        for (const auto& [name, frames] : boneKeyframes) {
-            if (frames.empty()) continue;
-            int prev = -1, next = -1;
-            for (int i = 0; i < frames.size(); ++i) {
-                if (frames[i]->frame > currentFrame) {
-                    next = i;
-                    break;
-                }
-                prev = i;
-            }
-
-            if (prev < 0 || next < 0) continue;
-            const auto* f1 = frames[prev];
-            const auto* f2 = frames[next];
-            float rawT = (currentFrame - f1->frame) / float(f2->frame - f1->frame);
-
-            // 보간 곡선 적용
-            float tx = BezierInterpolate(f1->interpolation[0][0], rawT);
-            float ty = BezierInterpolate(f1->interpolation[1][0], rawT);
-            float tz = BezierInterpolate(f1->interpolation[2][0], rawT);
-            float tr = BezierInterpolate(f1->interpolation[3][0], rawT);
-
-            glm::vec3 p1(f1->position[0], f1->position[1], f1->position[2]);
-            glm::vec3 p2(f2->position[0], f2->position[1], f2->position[2]);
-            glm::vec3 pos = glm::vec3(
-                glm::mix(p1.x, p2.x, tx),
-                glm::mix(p1.y, p2.y, ty),
-                glm::mix(p1.z, p2.z, tz)
-            );
-
-            glm::quat q1(f1->orientation[3], f1->orientation[0], f1->orientation[1], f1->orientation[2]);
-            glm::quat q2(f2->orientation[3], f2->orientation[0], f2->orientation[1], f2->orientation[2]);
-            glm::quat rot = glm::slerp(q1, q2, tr);
-
-            BonePose pose;
-            pose.position = pos;
-            pose.orientation = rot;
-            memcpy(pose.interpolation, f1->interpolation, sizeof(char) * 4 * 4 * 4); // optional
-
-            bonePoses[name] = pose;
-        }
-
-        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) footOffsetY += 0.5f;
-        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) footOffsetY -= 0.5f;
-        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) footOffsetX += 0.5f;
-        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) footOffsetX -= 0.5f;
-        const auto& bone = model.bones[2];
-        bonePoses[bone.bone_name].position = glm::vec3(footOffsetX, footOffsetY, 0.0f);
-
-        for (int i = 0; i < model.bone_count; ++i) {
-            const auto& bone = model.bones[i];
-            glm::vec3 pivot(bone.position[0], bone.position[1], bone.position[2]);
-            glm::mat4 Trest = glm::translate(glm::mat4(1.0f), pivot);
-
-            auto it = bonePoses.find(bone.bone_name);
-            if (it != bonePoses.end()) {
-                // delta(애니/오프셋) 있는 본에만 적용
-                glm::mat4 Tanim = glm::translate(glm::mat4(1.0f), it->second.position);
-                glm::mat4 Ranim = glm::toMat4(it->second.orientation);
-                transformMatrices[i] = Trest * Tanim * Ranim * glm::inverse(Trest);
-            }
-            else {
-                // delta 없는 본은 변형 없다고 알려 주기 위해 Identity
-                transformMatrices[i] = glm::mat4(1.0f);
-            }
-        }
-
-        // 모프 프레임 적용
-        morphWeights.clear();
-        for (const auto& [name, frames] : faceKeyframes) {
-            if (frames.empty()) continue;
-            int idx = -1;
-            for (int i = 0; i < frames.size(); ++i) {
-                if (frames[i]->frame > currentFrame) break;
-                idx = i;
-            }
-            if (idx >= 0) {
-                morphWeights[name] = frames[idx]->weight;
-            }
-        }
-        for (const auto& [name, weight] : morphWeights) {
-            auto it = morphNameToIndex.find(name);
-            if (it != morphNameToIndex.end()) {
-                ApplyMorph(model, gVertices, transformMatrices, it->second, weight);
-            }
-        }
-
-        // 부모 행렬 적용
-        for (int i = 0; i < model.bone_count; ++i) {
-            int parent = model.bones[i].parent_index;
-            if (parent >= 0)
-                boneMatrices[i] = boneMatrices[parent] * transformMatrices[i];
-            else
-                boneMatrices[i] = transformMatrices[i];
-        }
-
-        // IK 처리 시작
-        for (int i = 0; i < model.bone_count; ++i) {
-            const auto& bone = model.bones[i];
-            if (bone.bone_flag & 0x20 /* IK 플래그 */) {
-                SolverIK(bone, model.bones.get(), model.bone_count, transformMatrices);
-            }
-        }
-
-        GLint loc = glGetUniformLocation(shader.ID, "boneMatrices");
-        glUniformMatrix4fv(loc, 512, GL_FALSE, glm::value_ptr(boneMatrices[0]));
-
-        glBindBuffer(GL_ARRAY_BUFFER, vbo);
-        glBufferData(GL_ARRAY_BUFFER, gVertices.size() * sizeof(GLVertex), gVertices.data(), GL_STATIC_DRAW);
-
-        // 🔽 모델 그리기 (VAO 바인딩 및 그리기)
-        glBindVertexArray(vao);
-        int indexOffset = 0;
-        for (int i = 0; i < model.material_count; ++i) {
-            const auto& material = model.materials[i];
-            int indexCount = material.index_count;
-
-            // 📌 텍스처 인덱스
-            int texIndex = material.diffuse_texture_index;
-            int toonIndex = material.toon_texture_index;
-            int sphereIndex = material.sphere_texture_index;
-            int sphereMode = material.sphere_op_mode;
-
-            // 📌 사용 여부 확인
-            bool bUseToon = (toonIndex >= 0 && toonIndex < gTextures.size());
-            bool bUseSphere = (sphereIndex >= 0 && sphereIndex < gTextures.size());
-
-            // 📌 텍스처 바인딩
-            glActiveTexture(GL_TEXTURE0); // Diffuse
-            glBindTexture(GL_TEXTURE_2D, (texIndex >= 0 && texIndex < gTextures.size()) ? gTextures[texIndex] : 0);
-
-            glActiveTexture(GL_TEXTURE1); // Toon
-            glBindTexture(GL_TEXTURE_2D, bUseToon ? gTextures[toonIndex] : 0);
-
-            glActiveTexture(GL_TEXTURE2); // Sphere
-            glBindTexture(GL_TEXTURE_2D, bUseSphere ? gTextures[sphereIndex] : 0);
-
-            // 📌 셰이더 uniform 설정
-            // 🟡 sphereMode 전달 (0: 무효, 1: 승산, 2: 가산)
-            glUniform1i(glGetUniformLocation(shader.ID, "bUseToon"), bUseToon);
-            glUniform1i(glGetUniformLocation(shader.ID, "bUseSphere"), bUseSphere);
-            glUniform1i(glGetUniformLocation(shader.ID, "sphereMode"), bUseSphere ? sphereMode : 0);
-
-            // 머티리얼 속성 전달
-            glUniform4fv(glGetUniformLocation(shader.ID, "diffuse"), 1, material.diffuse);
-            glUniform3fv(glGetUniformLocation(shader.ID, "specular"), 1, material.specular);
-            glUniform1f(glGetUniformLocation(shader.ID, "specularPower"), material.specularlity);
-            glUniform3fv(glGetUniformLocation(shader.ID, "ambient"), 1, material.ambient);
-            glUniform1f(glGetUniformLocation(shader.ID, "Alpha"), material.diffuse[3]); // diffuse.a
-
-            // 드로우
-            glDrawElements(GL_TRIANGLES, indexCount, GL_UNSIGNED_INT, (void*)(indexOffset * sizeof(uint32_t)));
-            indexOffset += indexCount;
-        }
-
-        // 화면 표시 및 이벤트 처리
         glfwSwapBuffers(window);
         glfwPollEvents();
     }
 
-    // 정리
+    /* ---- ⑤ 종료 ---- */
+    actor.Destroy();
     glfwDestroyWindow(window);
     glfwTerminate();
     return 0;
