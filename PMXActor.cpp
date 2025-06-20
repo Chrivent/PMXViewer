@@ -75,13 +75,13 @@ void main(){
 
     vec3 diffCol = base * toonCol;
 
-    float specB = pow(max(dot(N, H), 0.0), kSpec.w);
+    float specB = pow(max(dot(N, H), 0.0), kSpec.a);
     vec3 specCol = kSpec.rgb * specB;
 
-    vec3 ambCol = base + clamp(kAmb, vec3(0.0), vec3(0.5)) - vec3(0.5);
+    vec3 ambCol = clamp(kAmb, vec3(0.0), vec3(0.5)) - vec3(0.5);
     vec3 finalRgb = diffCol + specCol + ambCol;
 
-    FragColor = vec4(finalRgb, kDiffuse.a);
+    FragColor = vec4(finalRgb , kDiffuse.a);
 }
 )GLSL";
 
@@ -200,9 +200,6 @@ bool PMXActor::Initialize(const pmx::PmxModel& m, const fs::path& pmxPath, const
     buildTextures(m);
     buildMaterials(m);
 
-    if (fallbackToon == 0)
-        fallbackToon = createFallbackToon();
-
     glCreateBuffers(1, &mUBOTransform);
     glNamedBufferStorage(mUBOTransform,
         sizeof(glm::mat4) * m.bone_count, nullptr, GL_DYNAMIC_STORAGE_BIT);
@@ -210,6 +207,9 @@ bool PMXActor::Initialize(const pmx::PmxModel& m, const fs::path& pmxPath, const
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    std::vector<pmx::PmxBone> boneVec(m.bones.get(), m.bones.get() + m.bone_count);
+    _nodeManager.Init(boneVec);
 
     return true;
 }
@@ -259,10 +259,6 @@ void PMXActor::Destroy() {
     if (!mTextures.empty())
         glDeleteTextures((GLsizei)mTextures.size(), mTextures.data());
     mTextures.clear(); mSubmeshes.clear(); mLocal.clear(); mSkin.clear();
-    if (fallbackToon) {
-        glDeleteTextures(1, &fallbackToon);
-        fallbackToon = 0;
-    }
 }
 
 /* ---------- buildBuffers ---------- */
@@ -302,8 +298,7 @@ void PMXActor::buildBuffers(const pmx::PmxModel& m) {
 
 /* ---------- buildMaterials ---------- */
 void PMXActor::buildMaterials(const pmx::PmxModel& m) {
-    mMaterials.assign(m.materials.get(),
-        m.materials.get() + m.material_count);
+    mMaterials.assign(m.materials.get(), m.materials.get() + m.material_count);
 }
 
 /* ---------- buildTextures (diffuse만) ---------- */
@@ -322,7 +317,7 @@ void PMXActor::buildTextures(const pmx::PmxModel& m) {
             int w, h, n; stbi_uc* data = stbi_load(utf8.c_str(), &w, &h, &n, 4);
             if (!data) { std::wcerr << L"[stb] " << abs << L" 실패\n"; return 0; }
             GLuint tex; glCreateTextures(GL_TEXTURE_2D, 1, &tex);
-            glTextureStorage2D(tex, 1, GL_SRGB8_ALPHA8, w, h);
+            glTextureStorage2D(tex, 1, GL_RGBA8, w, h);
             glTextureSubImage2D(tex, 0, 0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, data);
             glTextureParameteri(tex, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
             glTextureParameteri(tex, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
@@ -332,8 +327,7 @@ void PMXActor::buildTextures(const pmx::PmxModel& m) {
             };
 
         mTextures[i] = load(m.materials[i].diffuse_texture_index);
-        mToonTextures[i] = load(m.materials[i].toon_texture_index);   // PMX 필드 참조 :contentReference[oaicite:3]{index=3}
-        if (!mToonTextures[i]) mToonTextures[i] = fallbackToon;        // 기본 램프
+        mToonTextures[i] = load(m.materials[i].toon_texture_index);
     }
 }
 
@@ -341,24 +335,4 @@ void PMXActor::buildTextures(const pmx::PmxModel& m) {
 void PMXActor::uploadBones()const {
     glNamedBufferSubData(mUBOTransform, 0,
         mSkin.size() * sizeof(glm::mat4), mSkin.data());
-}
-
-GLuint PMXActor::createFallbackToon()
-{
-    // 1×256 그라데이션 (흰→검, 위에서 아래로)
-    const int W = 1, H = 256;
-    std::array<unsigned char, W* H> data;
-    for (int y = 0; y < H; ++y)
-        data[y] = static_cast<unsigned char>(255 - y);   // 상단 밝음
-
-    GLuint tex;
-    glCreateTextures(GL_TEXTURE_2D, 1, &tex);
-    glTextureStorage2D(tex, 1, GL_R8, W, H);             // 단일 채널
-    glTextureSubImage2D(tex, 0, 0, 0, W, H,
-        GL_RED, GL_UNSIGNED_BYTE, data.data());
-    glTextureParameteri(tex, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTextureParameteri(tex, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTextureParameteri(tex, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTextureParameteri(tex, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    return tex;
 }

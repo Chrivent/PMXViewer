@@ -6,6 +6,7 @@
 #include <filesystem>
 #include "Pmx.h"
 #include "Vmd.h"
+#include "NodeManager.h"
 
 namespace fs = std::filesystem;
 
@@ -59,9 +60,6 @@ private:
     static unsigned createProgram();                 // VS¡¤FS ÄÄÆÄÀÏ
 
     fs::path mModelDir;
-    GLuint fallbackToon = 0;
-
-    GLuint createFallbackToon();
 
     GLint locVP = -1;
     GLint locEye = -1;
@@ -69,4 +67,6 @@ private:
     GLint locDiff = -1;
     GLint locSpec = -1;
     GLint locAmb = -1;
+
+    NodeManager _nodeManager;
 };

@@ -15,7 +15,7 @@ find_package(glad CONFIG REQUIRED)
 find_package(glm CONFIG REQUIRED)
 
 # 실행 파일
-add_executable(PMXViewer "main.cpp" "Pmx.cpp" "BoneNode.h" "PMXActor.h"  "PMXActor.cpp")
+add_executable(PMXViewer "main.cpp" "Pmx.cpp" "PMXActor.cpp" "BoneNode.cpp" "NodeManager.cpp")
 
 # 라이브러리 연결
 target_link_libraries(PMXViewer PRIVATE glfw glad::glad glm::glm)

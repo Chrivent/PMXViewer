@@ -1,4 +1,6 @@
-﻿#include <glad/glad.h>
+﻿#define GLM_ENABLE_EXPERIMENTAL
+
+#include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include <iostream>
 #include <fstream>
@@ -10,9 +12,8 @@
 #include "Pmx.h"
 #include "Vmd.h"
 #include "IKSolver.h"
-#include "PMXActor.h"    
+#include "PMXActor.h"
 
-#define GLM_ENABLE_EXPERIMENTAL
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
@@ -38,9 +39,9 @@ double lastMouseX = 0.0, lastMouseY = 0.0;
 
 glm::vec3 cameraTarget = glm::vec3(0, 5, 0);
 
-float lightYaw = -45.0f;   // 초기 조명 방향 (degree)
-float lightPitch = 45.0f;
-glm::vec3 lightDir;
+float lightYaw = 45.0f;   // 초기 조명 방향 (degree)
+float lightPitch = -45.0f;
+glm::vec3 lightDir = glm::vec3(1, -1, -1);
 
 bool leftMouseDown = false;
 
