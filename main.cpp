@@ -211,10 +211,10 @@ float BezierInterpolate(const char curve[4], float t) {
     return bezier(mid, 0.0f, y1, y2, 1.0f);
 }
 
-class IKSolver
+void SolverIK(const pmx::PmxBone& ikBone, const pmx::PmxBone* bones, int boneCount, std::vector<glm::mat4>& transformMatrices)
 {
 
-};
+}
 
 class Shader {
 public:
@@ -765,14 +765,6 @@ int main()
             }
         }
 
-        // IK 처리 시작
-        for (int i = 0; i < model.bone_count; ++i) {
-            const auto& bone = model.bones[i];
-            if (bone.bone_flag & 0x20 /* IK 플래그 */) {
-                // IK 처리
-            }
-        }
-
         // 부모 행렬 적용
         for (int i = 0; i < model.bone_count; ++i) {
             int parent = model.bones[i].parent_index;
@@ -780,6 +772,14 @@ int main()
                 boneMatrices[i] = boneMatrices[parent] * transformMatrices[i];
             else
                 boneMatrices[i] = transformMatrices[i];
+        }
+
+        // IK 처리 시작
+        for (int i = 0; i < model.bone_count; ++i) {
+            const auto& bone = model.bones[i];
+            if (bone.bone_flag & 0x20 /* IK 플래그 */) {
+                SolverIK(bone, model.bones.get(), model.bone_count, transformMatrices);
+            }
         }
 
         GLint loc = glGetUniformLocation(shader.ID, "boneMatrices");
