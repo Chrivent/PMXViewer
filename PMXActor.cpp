@@ -1,10 +1,10 @@
 ﻿#include "PMXActor.h"
 
-#include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include <cstring>
 #include <iostream>
 #include <type_traits>
+#include <array>
 #include "stb_image.h"
 #include "EncodingHelper.h"
 
@@ -18,29 +18,62 @@ layout(location=0)in vec3 aPos; layout(location=1)in vec3 aNrm;
 layout(location=2)in vec2 aUV;  layout(location=7)in ivec4 aBi;
 layout(location=8)in vec4 aBw;
 
-layout(std140,binding=0)uniform Bones{mat4 uB[512];};
+layout(std140,binding=0)uniform Bones{mat4 uB[128];};
 uniform mat4 uVP;
+uniform vec3 uEye;
+uniform vec3 uLightDir;
 
-out VSOUT{vec2 uv; vec3 nrm;} vs;
+out VSOUT{
+    vec2 uv;
+    vec3 nrmW;
+    vec3 viewW;
+} vs;
+
 void main(){
-    mat4 skin = aBw.x*uB[aBi.x]+aBw.y*uB[aBi.y]+aBw.z*uB[aBi.z]+aBw.w*uB[aBi.w];
-    vec4 wp   = skin*vec4(aPos,1);
-    vs.nrm    = mat3(skin)*aNrm;
-    vs.uv     = aUV;
-    gl_Position = uVP*wp;
+    mat4 skin = aBw.x*uB[aBi.x] + aBw.y*uB[aBi.y]
+              + aBw.z*uB[aBi.z] + aBw.w*uB[aBi.w];
+    vec4 wp = skin * vec4(aPos,1.);
+    vs.nrmW  = mat3(skin)*aNrm;
+    vs.viewW = normalize(uEye - wp.xyz);
+    vs.uv    = aUV;
+    gl_Position = uVP * wp;
 }
 )GLSL";
 
 static const char* kFS = R"GLSL(
 #version 330 core
-in VSOUT{vec2 uv; vec3 nrm;} fs;
+in VSOUT{
+    vec2 uv;
+    vec3 nrmW;
+    vec3 viewW;
+} fs;
 out vec4 FragColor;
-layout(binding=2)uniform sampler2D uTex;
+layout(binding = 2) uniform sampler2D uTex;
+layout(binding = 3) uniform sampler2D uToon;
+
+uniform vec4  kDiffuse;
+uniform vec4  kSpec;
+uniform vec3  kAmb;
+
+uniform vec3  uLightDir;
+uniform vec3  uEye;
+
 void main(){
-    vec3 base = texture(uTex,fs.uv).rgb;
-    vec3 L = normalize(vec3(-0.3,1,0.4));
-    float NdotL = max(dot(normalize(fs.nrm),L),0);
-    FragColor = vec4(base*0.25 + base*0.75*NdotL,1);
+    vec3  base = texture(uTex, fs.uv).rgb;
+    vec3  N    = normalize(fs.nrmW);
+    vec3  L    = normalize(-uLightDir);
+    vec3  V    = normalize(fs.viewW);
+    vec3  H    = normalize(L + V);
+
+    float NdotL   = clamp(dot(N, L), 0.0, 1.0);
+    vec3  toonCol = texture(uToon, vec2(0.0, 1.0 - NdotL)).rgb;
+    vec3  diffCol = base * toonCol;
+
+    float specB = pow(max(dot(N, H), 0.0), kSpec.w);
+    vec3  specCol = kSpec.rgb * specB;
+
+    vec3  finalRgb = diffCol + specCol + kAmb.rgb * base;
+    FragColor     = vec4(finalRgb, kDiffuse.a);
 }
 )GLSL";
 
@@ -144,16 +177,32 @@ static void convertVertices(const pmx::PmxModel& m,
 
 /* ---------- Initialize ---------- */
 bool PMXActor::Initialize(const pmx::PmxModel& m, const fs::path& pmxPath, const vmd::VmdMotion* mot) {
-    mMotion = mot; mProgram = createProgram(); mModelDir = pmxPath.parent_path();
-    buildBuffers(m);  buildTextures(m);  buildMaterials(m);
+    mMotion = mot;
+    mProgram = createProgram();
+    mModelDir = pmxPath.parent_path();
+
+    locVP = glGetUniformLocation(mProgram, "uVP");
+    locEye = glGetUniformLocation(mProgram, "uEye");
+    locLight = glGetUniformLocation(mProgram, "uLightDir");
+    locDiff = glGetUniformLocation(mProgram, "kDiffuse");
+    locSpec = glGetUniformLocation(mProgram, "kSpec");
+    locAmb = glGetUniformLocation(mProgram, "kAmb");
+
+    buildBuffers(m);
+    buildTextures(m);
+    buildMaterials(m);
+
+    if (fallbackToon == 0)
+        fallbackToon = createFallbackToon();
 
     glCreateBuffers(1, &mUBOTransform);
     glNamedBufferStorage(mUBOTransform,
         sizeof(glm::mat4) * m.bone_count, nullptr, GL_DYNAMIC_STORAGE_BIT);
 
-    glCreateBuffers(1, &mUBOMaterial);
-    glNamedBufferStorage(mUBOMaterial,
-        sizeof(glm::vec4) * m.material_count * 3, nullptr, GL_DYNAMIC_STORAGE_BIT);
+    glEnable(GL_BLEND);
+    glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA,  // Color
+        GL_ONE, GL_ZERO);                      // Alpha
+    glBlendEquation(GL_FUNC_ADD);
 
     return true;
 }
@@ -166,17 +215,32 @@ void PMXActor::Update(float dt) {
 }
 
 /* ---------- Draw ---------- */
-void PMXActor::Draw(const glm::mat4& view, const glm::mat4& proj)const {
+void PMXActor::Draw(const glm::mat4& view, const glm::mat4& proj, const glm::vec3& eye, const glm::vec3& lightDir)const {
     glUseProgram(mProgram);
+    glProgramUniform3fv(mProgram,
+        glGetUniformLocation(mProgram, "uEye"), 1, &eye.x);
+    glProgramUniform3fv(mProgram,
+        glGetUniformLocation(mProgram, "uLightDir"), 1, &lightDir.x);
     glm::mat4 vp = proj * view;
     glUniformMatrix4fv(glGetUniformLocation(mProgram, "uVP"),
         1, GL_FALSE, &vp[0][0]);
 
     glBindVertexArray(mVAO);
     glBindBufferBase(GL_UNIFORM_BUFFER, 0, mUBOTransform);
-    glBindBufferBase(GL_UNIFORM_BUFFER, 1, mUBOMaterial);
     for (auto& s : mSubmeshes) {
+        const auto& mt = mMaterials[s.mat];
+        float diff[4] = { mt.diffuse[0],  mt.diffuse[1],
+                          mt.diffuse[2],  mt.diffuse[3] };
+        float spec[4] = { mt.specular[0], mt.specular[1],
+                          mt.specular[2], mt.specularlity };
+        float amb[3] = { mt.ambient[0],  mt.ambient[1],
+                          mt.ambient[2] };
+        glProgramUniform4fv(mProgram, locDiff, 1, diff);
+        glProgramUniform4fv(mProgram, locSpec, 1, spec);
+        glProgramUniform3fv(mProgram, locAmb, 1, amb);
+
         glBindTextureUnit(2, mTextures[s.mat]);
+        glBindTextureUnit(3, mToonTextures[s.mat]);
         glDrawElementsBaseVertex(GL_TRIANGLES, s.cnt, GL_UNSIGNED_INT,
             (void*)(sizeof(uint32_t) * s.ofs), 0);
     }
@@ -187,10 +251,13 @@ void PMXActor::Destroy() {
     glDeleteProgram(mProgram);
     glDeleteBuffers(1, &mVBO); glDeleteBuffers(1, &mEBO);
     glDeleteVertexArrays(1, &mVAO);
-    glDeleteBuffers(1, &mUBOTransform); glDeleteBuffers(1, &mUBOMaterial);
     if (!mTextures.empty())
         glDeleteTextures((GLsizei)mTextures.size(), mTextures.data());
     mTextures.clear(); mSubmeshes.clear(); mLocal.clear(); mSkin.clear();
+    if (fallbackToon) {
+        glDeleteTextures(1, &fallbackToon);
+        fallbackToon = 0;
+    }
 }
 
 /* ---------- buildBuffers ---------- */
@@ -230,45 +297,38 @@ void PMXActor::buildBuffers(const pmx::PmxModel& m) {
 
 /* ---------- buildMaterials ---------- */
 void PMXActor::buildMaterials(const pmx::PmxModel& m) {
-    struct M { glm::vec4 d, s, a; };
-    std::vector<M> buf(m.material_count);
-    for (uint32_t i = 0; i < m.material_count; ++i) {
-        auto& s = m.materials[i];
-        buf[i].d = { s.diffuse[0],s.diffuse[1],s.diffuse[2],s.diffuse[3] };
-        buf[i].s = { s.specular[0],s.specular[1],s.specular[2],s.specularlity };
-        buf[i].a = { s.ambient[0],s.ambient[1],s.ambient[2],1.0f };
-    }
-    glNamedBufferSubData(mUBOMaterial, 0, buf.size() * sizeof(M), buf.data());
+    mMaterials.assign(m.materials.get(),
+        m.materials.get() + m.material_count);
 }
 
 /* ---------- buildTextures (diffuse만) ---------- */
 void PMXActor::buildTextures(const pmx::PmxModel& m) {
     EncodingConverter conv;
-    mTextures.resize(m.material_count, 0);
-    for (uint32_t i = 0; i < m.material_count; ++i) {
-        int tid = m.materials[i].diffuse_texture_index;
-        if (tid < 0 || tid >= m.texture_count) continue;
-        fs::path abs = mModelDir / m.textures[tid];
-        std::string pathUtf8;
-        conv.Utf16ToUtf8(abs.c_str(),
-            static_cast<int>(abs.wstring().length()),
-            &pathUtf8);
-        int w, h, n;
-        stbi_uc* data = stbi_load(pathUtf8.c_str(), &w, &h, &n, 4);
-        if (!data) {
-            std::wcerr << L"[stb] load fail: " << abs.wstring() << L'\n';
-            continue;
-        }
-        glCreateTextures(GL_TEXTURE_2D, 1, &mTextures[i]);
-        glTextureStorage2D(mTextures[i], 1, GL_RGBA8, w, h);
-        glTextureSubImage2D(mTextures[i], 0, 0, 0, w, h,
-            GL_RGBA, GL_UNSIGNED_BYTE, data);
-        glGenerateTextureMipmap(mTextures[i]);
-        glTextureParameteri(mTextures[i],
-            GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-        glTextureParameteri(mTextures[i],
-            GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        stbi_image_free(data);
+    mTextures.resize(m.material_count);          // diffuse
+    mToonTextures.resize(m.material_count);      // 새 배열
+
+    for (uint32_t i = 0; i < m.material_count; ++i)
+    {
+        auto load = [&](int idx)->GLuint {
+            if (idx < 0 || idx >= m.texture_count) return 0;
+            fs::path abs = mModelDir / m.textures[idx];
+            std::string utf8; conv.Utf16ToUtf8(abs.c_str(),
+                (int)abs.wstring().length(), &utf8);
+            int w, h, n; stbi_uc* data = stbi_load(utf8.c_str(), &w, &h, &n, 4);
+            if (!data) { std::wcerr << L"[stb] " << abs << L" 실패\n"; return 0; }
+            GLuint tex; glCreateTextures(GL_TEXTURE_2D, 1, &tex);
+            glTextureStorage2D(tex, 1, GL_SRGB8_ALPHA8, w, h);
+            glTextureSubImage2D(tex, 0, 0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, data);
+            glTextureParameteri(tex, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            glTextureParameteri(tex, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+            glTextureParameteri(tex, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            glTextureParameteri(tex, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            stbi_image_free(data); return tex;
+            };
+
+        mTextures[i] = load(m.materials[i].diffuse_texture_index);
+        mToonTextures[i] = load(m.materials[i].toon_texture_index);   // PMX 필드 참조 :contentReference[oaicite:3]{index=3}
+        if (!mToonTextures[i]) mToonTextures[i] = fallbackToon;        // 기본 램프
     }
 }
 
@@ -276,4 +336,24 @@ void PMXActor::buildTextures(const pmx::PmxModel& m) {
 void PMXActor::uploadBones()const {
     glNamedBufferSubData(mUBOTransform, 0,
         mSkin.size() * sizeof(glm::mat4), mSkin.data());
+}
+
+GLuint PMXActor::createFallbackToon()
+{
+    // 1×256 그라데이션 (흰→검, 위에서 아래로)
+    const int W = 1, H = 256;
+    std::array<unsigned char, W* H> data;
+    for (int y = 0; y < H; ++y)
+        data[y] = static_cast<unsigned char>(255 - y);   // 상단 밝음
+
+    GLuint tex;
+    glCreateTextures(GL_TEXTURE_2D, 1, &tex);
+    glTextureStorage2D(tex, 1, GL_R8, W, H);             // 단일 채널
+    glTextureSubImage2D(tex, 0, 0, 0, W, H,
+        GL_RED, GL_UNSIGNED_BYTE, data.data());
+    glTextureParameteri(tex, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTextureParameteri(tex, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTextureParameteri(tex, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTextureParameteri(tex, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    return tex;
 }

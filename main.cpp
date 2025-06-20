@@ -40,6 +40,8 @@ glm::vec3 cameraTarget = glm::vec3(0, 5, 0);
 
 float lightYaw = -45.0f;   // 초기 조명 방향 (degree)
 float lightPitch = 45.0f;
+glm::vec3 lightDir;
+
 bool leftMouseDown = false;
 
 // 마우스 휠 콜백
@@ -102,6 +104,13 @@ void CursorPosCallback(GLFWwindow* window, double xpos, double ypos)
         lightPitch += dy * lightSensitivity;
         lightPitch = clamp(lightPitch, -89.0f, 89.0f);
     }
+
+    lightDir = glm::vec3(
+        cos(glm::radians(lightPitch)) * cos(glm::radians(lightYaw)),
+        sin(glm::radians(lightPitch)),
+        cos(glm::radians(lightPitch)) * sin(glm::radians(lightYaw))
+    );
+    lightDir = glm::normalize(lightDir);
 }
 
 vector<wstring> FindAllPMXFiles(const wstring& folderPath) {
@@ -282,7 +291,7 @@ int main()
 
         glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-        actor.Draw(view, proj);
+        actor.Draw(view, proj, eye, lightDir);
 
         glfwSwapBuffers(window);
         glfwPollEvents();
