@@ -211,11 +211,10 @@ float BezierInterpolate(const char curve[4], float t) {
     return bezier(mid, 0.0f, y1, y2, 1.0f);
 }
 
-void SolveIK(const pmx::PmxBone& ikBone, const pmx::PmxBone* bones, int boneCount,
-    std::vector<glm::mat4>& transformMatrices)
+class IKSolver
 {
-    
-}
+
+};
 
 class Shader {
 public:
@@ -770,7 +769,7 @@ int main()
         for (int i = 0; i < model.bone_count; ++i) {
             const auto& bone = model.bones[i];
             if (bone.bone_flag & 0x20 /* IK 플래그 */) {
-                SolveIK(bone, model.bones.get(), model.bone_count, transformMatrices);
+                // IK 처리
             }
         }
 
