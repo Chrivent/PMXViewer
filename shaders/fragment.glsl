@@ -1,7 +1,7 @@
 #version 330 core
 in vec3 FragNormal;
 in vec2 FragUV;
-in vec3 FragWorldPos; // 월드 공간의 정점 위치
+in vec3 FragWorldPos;
 
 out vec4 FragColor;
 
@@ -19,27 +19,29 @@ uniform float Alpha;
 uniform bool bUseToon;
 uniform bool bUseSphere;
 
-uniform vec3 cameraPos; // 카메라 위치
+uniform vec3 cameraPos;
 uniform vec3 lightDir;
 
 void main() {
-    vec3 normal = normalize(FragNormal);
+    vec3 N = normalize(FragNormal);
+    vec3 L = normalize(-lightDir);
+    vec3 V = normalize(cameraPos - FragWorldPos);
+    vec3 H = normalize(L + V);
+
     vec4 texColor = texture(tex, FragUV);
+    vec3 base = texColor.rgb * diffuse.rgb;
 
-    vec3 baseColor = texColor.rgb * diffuse.rgb;
+    float NdotL = clamp(dot(N, L), 0.0, 1.0);
 
-    float NdotL = max(dot(normal, normalize(-lightDir)), 0.0);
+    vec3 toonCol = bUseToon ? texture(toonTex, vec2(0.0, 1.0 - NdotL)).rgb : vec3(1.0);
+    vec3 diffCol = base * toonCol;
 
-    vec3 lightColor;
-    if (bUseToon) {
-        lightColor = texture(toonTex, vec2(0.0, 1.0 - NdotL)).rgb;
-    } else {
-        lightColor = vec3(1.0);
-    }
+    float specB = pow(max(dot(N, H), 0.0), specularPower);
+    vec3 specCol = specular * specB;
 
-    vec3 finalColor = baseColor * lightColor + clamp(ambient, vec3(0.0), vec3(0.5)) - vec3(0.5);
+    vec3 ambCol = clamp(ambient, vec3(0.0), vec3(0.5)) - vec3(0.5);
+    vec3 finalRgb = diffCol + specCol + ambCol;
 
     float finalAlpha = diffuse.a * texColor.a * Alpha;
-
-    FragColor = vec4(finalColor, finalAlpha);
+    FragColor = vec4(finalRgb , finalAlpha);
 }
