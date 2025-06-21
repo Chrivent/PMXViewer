@@ -2,6 +2,9 @@
 
 #include <algorithm>
 
+#define GLM_ENABLE_EXPERIMENTAL
+#include <glm/gtx/quaternion.hpp>
+
 BoneNode::BoneNode(unsigned int index, const pmx::PmxBone& pmxBone)
     : _boneIndex(index),
     _name(pmxBone.bone_name),
@@ -37,6 +40,13 @@ void BoneNode::SortAllKeys()
         });
 }
 
+unsigned int BoneNode::GetMaxFrameNo() const
+{
+    if (_motionKeys.empty())
+        return 0;
+    return _motionKeys.back().frameNo;
+}
+
 void BoneNode::UpdateLocalTransform()
 {
     glm::mat4 scale = glm::mat4(1.0f);  // 현재 스케일 없음
@@ -57,7 +67,7 @@ void BoneNode::UpdateGlobalTransform()
     }
     else
     {
-        _globalTransform = _localTransform * _parentBoneNode->GetGlobalTransform();
+        _globalTransform = _parentBoneNode->GetGlobalTransform() * _localTransform;
     }
 
     for (BoneNode* child : _childrenNodes)

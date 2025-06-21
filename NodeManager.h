@@ -1,12 +1,14 @@
 #pragma once
 
+#include <iostream>
 #include <unordered_map>
+#include "Pmx.h"
 #include "BoneNode.h"
 
 class NodeManager
 {
 public:
-	void Init(const std::vector<pmx::PmxBone>& bones);
+	void Init(const std::vector<const pmx::PmxBone*>& bones);
 	void SortKey();
 
 	BoneNode* GetBoneNodeByIndex(int index) const;

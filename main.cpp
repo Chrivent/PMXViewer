@@ -1,6 +1,4 @@
-﻿#define GLM_ENABLE_EXPERIMENTAL
-
-#include <glad/glad.h>
+﻿#include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include <iostream>
 #include <fstream>
@@ -9,16 +7,14 @@
 #include <fcntl.h>
 #include <io.h>
 
-#include "Pmx.h"
-#include "Vmd.h"
-#include "IKSolver.h"
-#include "PMXActor.h"
-
+#define GLM_ENABLE_EXPERIMENTAL
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 #include <glm/gtx/quaternion.hpp>
 #include <glm/gtx/string_cast.hpp>
+
+#include "PMXActor.h"
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
@@ -253,9 +249,10 @@ int main()
 
     /* ---- ③ PMXActor 생성·초기화 ---- */
     PMXActor actor;
-    if (!actor.Initialize(model, fs::path(pmxPath), motion.get())) {
+    if (!actor.Initialize(model, std::filesystem::path(pmxPath))) {
         wcerr << L"PMXActor 초기화 실패!\n"; return -1;
     }
+    actor.InitAnimation(motion.get());
 
     /* ---- ④ 메인 루프 ---- */
     double last = glfwGetTime();
@@ -285,6 +282,7 @@ int main()
 
         /* 업데이트 + 렌더 */
         actor.Update(dt);
+        actor.UpdateAnimation(dt);
 
         glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);

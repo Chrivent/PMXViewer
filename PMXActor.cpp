@@ -1,15 +1,15 @@
 ﻿#include "PMXActor.h"
 
-#include <GLFW/glfw3.h>
 #include <cstring>
 #include <iostream>
 #include <type_traits>
 #include <array>
 #include "stb_image.h"
 #include "EncodingHelper.h"
-
-using namespace pmx;
-using oguna::EncodingConverter;
+#include "BoneNode.h"
+#include "NodeManager.h"
+#include "Pmx.h"
+#include "Vmd.h"
 
 /* ---------- 셰이더 소스 ---------- */
 static const char* kVS = R"GLSL(
@@ -108,7 +108,8 @@ unsigned PMXActor::createProgram() {
 /* ---------- 정점 변환 ---------- */
 static void convertVertices(const pmx::PmxModel& m,
     std::vector<PMXVertex>& v,
-    std::vector<uint32_t>& i) {
+    std::vector<uint32_t>& i)
+{
     v.resize(m.vertex_count);
 
     for (uint32_t n = 0; n < m.vertex_count; ++n)
@@ -116,67 +117,74 @@ static void convertVertices(const pmx::PmxModel& m,
         const auto& src = m.vertices[n];
         PMXVertex& dst = v[n];
 
-        /* 위치·법선·UV */
+        /* ── 위치·법선·UV ── */
         dst.position = { src.position[0], src.position[1], src.position[2] };
-        dst.normal = { src.normal[0],   src.normal[1],   src.normal[2] };
-        dst.uv = { src.uv[0],       src.uv[1] };
+        dst.normal = { src.normal[0] , src.normal[1] , src.normal[2] };
+        dst.uv = { src.uv[0]     , src.uv[1] };
 
-        /* -------- 스킨 가중치 처리 -------- */
+        /* ── 스킨 가중치 ── */
         glm::ivec4 idx(0);
         glm::vec4  w(0.0f);
 
-        const auto* sk = src.skinning.get();      // unique_ptr<PmxVertexSkinning>
+        const auto* sk = src.skinning.get();           // actual type 확인
+        using ST = pmx::PmxVertexSkinningType;
 
-        if (const auto* b1 = dynamic_cast<const PmxVertexSkinningBDEF1*>(sk))
+        if (auto* s = dynamic_cast<const pmx::PmxVertexSkinningBDEF1*>(sk))
         {
-            idx.x = b1->bone_index;
+            dst.weightType = pmx::PmxVertexSkinningType::BDEF1;
+            idx.x = s->bone_index;
             w.x = 1.0f;
         }
-        else if (const auto* b2 = dynamic_cast<const PmxVertexSkinningBDEF2*>(sk))
+        else if (auto* s = dynamic_cast<const pmx::PmxVertexSkinningBDEF2*>(sk))
         {
-            idx.x = b2->bone_index1;
-            idx.y = b2->bone_index2;
-            w.x = 1.0f - b2->bone_weight;   // PMX:  weight = bone2
-            w.y = b2->bone_weight;          //        1-weight = bone1
+            dst.weightType = pmx::PmxVertexSkinningType::BDEF2;
+            idx.x = s->bone_index1;
+            idx.y = s->bone_index2;
+            w.x = 1.0f - s->bone_weight;   // bone1
+            w.y = s->bone_weight;          // bone2
         }
-        else if (const auto* b4 = dynamic_cast<const PmxVertexSkinningBDEF4*>(sk))
+        else if (auto* s = dynamic_cast<const pmx::PmxVertexSkinningBDEF4*>(sk))
         {
-            idx = { b4->bone_index1, b4->bone_index2,
-                    b4->bone_index3, b4->bone_index4 };
-            w = { b4->bone_weight1, b4->bone_weight2,
-                    b4->bone_weight3, b4->bone_weight4 };
+            dst.weightType = pmx::PmxVertexSkinningType::BDEF4;
+            idx = { s->bone_index1, s->bone_index2,
+                    s->bone_index3, s->bone_index4 };
+            w = { s->bone_weight1, s->bone_weight2,
+                    s->bone_weight3, s->bone_weight4 };
         }
-        else if (const auto* sd = dynamic_cast<const PmxVertexSkinningSDEF*>(sk))
+        else if (auto* s = dynamic_cast<const pmx::PmxVertexSkinningSDEF*>(sk))
         {
-            idx.x = sd->bone_index1;
-            idx.y = sd->bone_index2;
-            w.x = 1.0f - sd->bone_weight;
-            w.y = sd->bone_weight;
+            dst.weightType = pmx::PmxVertexSkinningType::SDEF;
+            idx.x = s->bone_index1;
+            idx.y = s->bone_index2;
+            w.x = 1.0f - s->bone_weight;
+            w.y = s->bone_weight;
 
             /* SDEF 전용 파라미터 */
-            dst.sdefC = { sd->sdef_c[0], sd->sdef_c[1], sd->sdef_c[2] };
-            dst.sdefR0 = { sd->sdef_r0[0], sd->sdef_r0[1], sd->sdef_r0[2] };
-            dst.sdefR1 = { sd->sdef_r1[0], sd->sdef_r1[1], sd->sdef_r1[2] };
+            dst.sdefC = { s->sdef_c[0], s->sdef_c[1], s->sdef_c[2] };
+            dst.sdefR0 = { s->sdef_r0[0], s->sdef_r0[1], s->sdef_r0[2] };
+            dst.sdefR1 = { s->sdef_r1[0], s->sdef_r1[1], s->sdef_r1[2] };
         }
-        else if (const auto* q4 = dynamic_cast<const PmxVertexSkinningQDEF*>(sk))
+        else if (auto* s = dynamic_cast<const pmx::PmxVertexSkinningQDEF*>(sk))
         {
-            idx = { q4->bone_index1, q4->bone_index2,
-                    q4->bone_index3, q4->bone_index4 };
-            w = { q4->bone_weight1, q4->bone_weight2,
-                    q4->bone_weight3, q4->bone_weight4 };
+            dst.weightType = pmx::PmxVertexSkinningType::QDEF;
+            idx = { s->bone_index1, s->bone_index2,
+                    s->bone_index3, s->bone_index4 };
+            w = { s->bone_weight1, s->bone_weight2,
+                    s->bone_weight3, s->bone_weight4 };
         }
-        else {
-            // 예외 처리(잘못된 포인터) – 전부 0
+        else
+        {
+            /* 예외‧미지정 → 단일본으로 취급 */
+            dst.weightType = pmx::PmxVertexSkinningType::BDEF1;
+            idx.x = 0;  w.x = 1.0f;
         }
 
-        dst.boneIdx = idx;
-        dst.boneWeight = w;
+        dst.boneIndices = idx;
+        dst.boneWeights = w;
 
-        /* 에지 배율 */
+        /* ── 기타 속성 ── */
         dst.edgeMag = src.edge;
-
-        /* addUV 초기화 (필요 없다면 유지) */
-        std::memset(dst.addUV, 0, sizeof(dst.addUV));
+        std::memset(dst.additionalUV, 0, sizeof(dst.additionalUV));
     }
 
     /* 인덱스 복사 */
@@ -184,8 +192,8 @@ static void convertVertices(const pmx::PmxModel& m,
 }
 
 /* ---------- Initialize ---------- */
-bool PMXActor::Initialize(const pmx::PmxModel& m, const fs::path& pmxPath, const vmd::VmdMotion* mot) {
-    mMotion = mot;
+bool PMXActor::Initialize(pmx::PmxModel& m, const std::filesystem::path& pmxPath) {
+    mModel = &m;
     mProgram = createProgram();
     mModelDir = pmxPath.parent_path();
 
@@ -208,17 +216,50 @@ bool PMXActor::Initialize(const pmx::PmxModel& m, const fs::path& pmxPath, const
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-    std::vector<pmx::PmxBone> boneVec(m.bones.get(), m.bones.get() + m.bone_count);
+    std::vector<const pmx::PmxBone*> boneVec;
+    boneVec.reserve(m.bone_count);
+    for (uint32_t i = 0; i < m.bone_count; ++i) {
+        boneVec.push_back(&m.bones[i]);  // 포인터만 저장
+    }
     _nodeManager.Init(boneVec);
 
     return true;
 }
 
+void PMXActor::InitAnimation(const vmd::VmdMotion* motion)
+{
+    if (!motion) return;
+
+    for (const auto& frame : motion->bone_frames)
+    {
+        std::wstring boneName;
+        oguna::EncodingConverter{}.Cp932ToUtf16(frame.name.c_str(), (int)frame.name.length(), &boneName);
+
+        BoneNode* boneNode = _nodeManager.GetBoneNodeByName(boneName);
+        if (!boneNode) continue;
+
+        glm::quat quaternion(frame.orientation[3], frame.orientation[0], frame.orientation[1], frame.orientation[2]);
+        glm::vec3 offset(frame.position[0], frame.position[1], frame.position[2]);
+
+        glm::vec2 p1 = {
+            static_cast<float>(frame.interpolation[0][1][0]) / 127.0f,
+            static_cast<float>(frame.interpolation[0][1][1]) / 127.0f
+        };
+
+        glm::vec2 p2 = {
+            static_cast<float>(frame.interpolation[0][1][2]) / 127.0f,
+            static_cast<float>(frame.interpolation[0][1][3]) / 127.0f
+        };
+
+        boneNode->AddMotionKey(frame.frame, quaternion, offset, p1, p2);
+    }
+
+    _nodeManager.SortKey();
+}
+
 /* ---------- Update ---------- */
 void PMXActor::Update(float dt) {
-    mCurrentFrame += dt * 30.f;
-    /* TODO: 키프레임 → mLocal,  IK → mSkin 계산 */
-    if (!mSkin.empty()) uploadBones();
+
 }
 
 /* ---------- Draw ---------- */
@@ -251,6 +292,27 @@ void PMXActor::Draw(const glm::mat4& view, const glm::mat4& proj, const glm::vec
     }
 }
 
+/* ---------- Update Animation ---------- */
+void PMXActor::UpdateAnimation(float dt) {
+    _elapsedTime += dt;
+    unsigned int frameNo = static_cast<unsigned int>(_elapsedTime * 30.0f);  // 30fps 기준
+
+    if (frameNo > 300) {
+        _elapsedTime = 0.0f;
+        frameNo = 0;
+    }
+
+    _nodeManager.UpdateAnimation(frameNo);
+
+    for (int i = 0; i < mSkin.size(); ++i) {
+        const BoneNode* bn = _nodeManager.GetBoneNodeByIndex(i);
+        /* ✅ ① 글로벌 * 바인드-포즈(초기행렬)의 역행렬 */
+        mSkin[i] = bn->GetGlobalTransform() * bn->GetInitInverseTransform();
+    }
+
+    if (!mSkin.empty()) uploadBones();
+}
+
 /* ---------- Destroy ---------- */
 void PMXActor::Destroy() {
     glDeleteProgram(mProgram);
@@ -263,7 +325,8 @@ void PMXActor::Destroy() {
 
 /* ---------- buildBuffers ---------- */
 void PMXActor::buildBuffers(const pmx::PmxModel& m) {
-    std::vector<PMXVertex> v; std::vector<uint32_t> idx;
+    std::vector<PMXVertex> v;
+    std::vector<uint32_t> idx;
     convertVertices(m, v, idx);
 
     glCreateBuffers(1, &mVBO);
@@ -284,8 +347,8 @@ void PMXActor::buildBuffers(const pmx::PmxModel& m) {
     add(0, 3, GL_FLOAT, offsetof(PMXVertex, position));
     add(1, 3, GL_FLOAT, offsetof(PMXVertex, normal));
     add(2, 2, GL_FLOAT, offsetof(PMXVertex, uv));
-    add(7, 4, GL_INT, offsetof(PMXVertex, boneIdx), true);
-    add(8, 4, GL_FLOAT, offsetof(PMXVertex, boneWeight));
+    add(7, 4, GL_INT, offsetof(PMXVertex, boneIndices), true);
+    add(8, 4, GL_FLOAT, offsetof(PMXVertex, boneWeights));
 
     uint32_t cur = 0;
     for (uint32_t i = 0; i < m.material_count; ++i) {
@@ -293,7 +356,8 @@ void PMXActor::buildBuffers(const pmx::PmxModel& m) {
         mSubmeshes.push_back({ cur, icnt, i });
         cur += icnt;
     }
-    mLocal.resize(m.bone_count, glm::mat4(1)); mSkin = mLocal;
+    mLocal.resize(m.bone_count, glm::mat4(1));
+    mSkin = mLocal;
 }
 
 /* ---------- buildMaterials ---------- */
@@ -303,7 +367,7 @@ void PMXActor::buildMaterials(const pmx::PmxModel& m) {
 
 /* ---------- buildTextures (diffuse만) ---------- */
 void PMXActor::buildTextures(const pmx::PmxModel& m) {
-    EncodingConverter conv;
+    oguna::EncodingConverter conv;
     mTextures.resize(m.material_count);          // diffuse
     mToonTextures.resize(m.material_count);      // 새 배열
 
@@ -311,7 +375,7 @@ void PMXActor::buildTextures(const pmx::PmxModel& m) {
     {
         auto load = [&](int idx)->GLuint {
             if (idx < 0 || idx >= m.texture_count) return 0;
-            fs::path abs = mModelDir / m.textures[idx];
+            std::filesystem::path abs = mModelDir / m.textures[idx];
             std::string utf8; conv.Utf16ToUtf8(abs.c_str(),
                 (int)abs.wstring().length(), &utf8);
             int w, h, n; stbi_uc* data = stbi_load(utf8.c_str(), &w, &h, &n, 4);

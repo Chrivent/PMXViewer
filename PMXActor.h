@@ -8,15 +8,14 @@
 #include "Vmd.h"
 #include "NodeManager.h"
 
-namespace fs = std::filesystem;
-
 // ───── 정점 구조 ─────
 struct PMXVertex {
     glm::vec3 position, normal;
     glm::vec2 uv;
-    glm::vec4 addUV[4]{};
-    glm::ivec4 boneIdx{};
-    glm::vec4  boneWeight{};
+    glm::vec4 additionalUV[4]{};
+    pmx::PmxVertexSkinningType weightType;
+    glm::ivec4 boneIndices{};
+    glm::vec4  boneWeights{};
     glm::vec3  sdefC{}, sdefR0{}, sdefR1{};
     float      edgeMag = 0.f;
 };
@@ -24,17 +23,16 @@ struct PMXVertex {
 // ───── PMXActor 클래스 ─────
 class PMXActor {
 public:
-    bool Initialize(const pmx::PmxModel& model,
-        const fs::path& pmxPath,
-        const vmd::VmdMotion* motion = nullptr);
+    bool Initialize(pmx::PmxModel& model, const std::filesystem::path& pmxPath);
+    void InitAnimation(const vmd::VmdMotion* motion = nullptr);
     void Update(float dt);
-    void Draw(const glm::mat4& view,
-        const glm::mat4& proj,
-        const glm::vec3& eye,
-        const glm::vec3& lightDir) const;
+    void Draw(const glm::mat4& view, const glm::mat4& proj, const glm::vec3& eye, const glm::vec3& lightDir) const;
+    void UpdateAnimation(float dt);
     void Destroy();
 
 private:
+    pmx::PmxModel* mModel;
+
     /* GPU 리소스 */
     unsigned mVAO{}, mVBO{}, mEBO{};
     unsigned mUBOTransform{};
@@ -59,7 +57,7 @@ private:
     void uploadBones() const;
     static unsigned createProgram();                 // VS·FS 컴파일
 
-    fs::path mModelDir;
+    std::filesystem::path mModelDir;
 
     GLint locVP = -1;
     GLint locEye = -1;
@@ -69,4 +67,5 @@ private:
     GLint locAmb = -1;
 
     NodeManager _nodeManager;
+    float _elapsedTime = 0.0f;
 };

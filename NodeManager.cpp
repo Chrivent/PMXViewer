@@ -1,16 +1,16 @@
 #include "NodeManager.h"
 
-#include <glm/gtc/type_ptr.hpp>
 #include <algorithm>
+#include <glm/gtc/type_ptr.hpp>
 
-void NodeManager::Init(const std::vector<pmx::PmxBone>& bones)
+void NodeManager::Init(const std::vector<const pmx::PmxBone*>& bones)
 {
     _boneNodeByIdx.resize(bones.size());
     _sortedNodes.resize(bones.size());
 
     for (int index = 0; index < bones.size(); index++)
     {
-        const pmx::PmxBone& currentBoneData = bones[index];
+        const pmx::PmxBone& currentBoneData = *bones[index];
         _boneNodeByIdx[index] = new BoneNode(index, currentBoneData);
         _boneNodeByName[_boneNodeByIdx[index]->GetName()] = _boneNodeByIdx[index];
         _sortedNodes[index] = _boneNodeByIdx[index];
@@ -36,8 +36,8 @@ void NodeManager::Init(const std::vector<pmx::PmxBone>& bones)
         if (currentBoneNode->GetParentBoneNode() == nullptr)
             continue;
 
-        glm::vec3 pos = glm::make_vec3(bones[currentBoneNode->GetBoneIndex()].position);
-        glm::vec3 parentPos = glm::make_vec3(bones[currentBoneNode->GetParentBoneIndex()].position);
+        glm::vec3 pos = glm::make_vec3(bones[currentBoneNode->GetBoneIndex()]->position);
+        glm::vec3 parentPos = glm::make_vec3(bones[currentBoneNode->GetParentBoneIndex()]->position);
         glm::vec3 resultPos = pos - parentPos;
 
         currentBoneNode->SetPosition(resultPos);
@@ -60,6 +60,19 @@ void NodeManager::SortKey()
     }
 }
 
+BoneNode* NodeManager::GetBoneNodeByIndex(int index) const
+{
+    if (index < 0 || index >= static_cast<int>(_boneNodeByIdx.size()))
+        return nullptr;
+    return _boneNodeByIdx[index];
+}
+
+BoneNode* NodeManager::GetBoneNodeByName(std::wstring& name) const
+{
+    auto it = _boneNodeByName.find(name);
+    return (it != _boneNodeByName.end()) ? it->second : nullptr;
+}
+
 void NodeManager::UpdateAnimation(unsigned int frameNo)
 {
     for (BoneNode* curNode : _boneNodeByIdx)
@@ -72,4 +85,15 @@ void NodeManager::UpdateAnimation(unsigned int frameNo)
     {
         _boneNodeByIdx[0]->UpdateGlobalTransform();
     }
+}
+
+void NodeManager::Dispose()
+{
+    for (BoneNode* node : _boneNodeByIdx)
+    {
+        delete node;
+    }
+    _boneNodeByIdx.clear();
+    _boneNodeByName.clear();
+    _sortedNodes.clear();
 }
