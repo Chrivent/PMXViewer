@@ -717,15 +717,8 @@ int main()
             pose.orientation = rot;
             memcpy(pose.interpolation, f1->interpolation, sizeof(char) * 4 * 4 * 4); // optional
 
-            bonePoses[name] = pose;
+            //bonePoses[name] = pose;
         }
-
-        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) footOffsetY += 0.5f;
-        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) footOffsetY -= 0.5f;
-        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) footOffsetX += 0.5f;
-        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) footOffsetX -= 0.5f;
-        const auto& bone = model.bones[2];
-        bonePoses[bone.bone_name].position = glm::vec3(footOffsetX, footOffsetY, 0.0f);
 
         for (int i = 0; i < model.bone_count; ++i) {
             const auto& bone = model.bones[i];
@@ -765,25 +758,16 @@ int main()
             }
         }
 
-        // 부모 행렬 적용
-        for (int i = 0; i < model.bone_count; ++i) {
+        /*for (int i = 0; i < model.bone_count; ++i) {
             int parent = model.bones[i].parent_index;
             if (parent >= 0)
                 boneMatrices[i] = boneMatrices[parent] * transformMatrices[i];
             else
                 boneMatrices[i] = transformMatrices[i];
-        }
-
-        // IK 처리 시작
-        for (int i = 0; i < model.bone_count; ++i) {
-            const auto& bone = model.bones[i];
-            if (bone.bone_flag & 0x20 /* IK 플래그 */) {
-                SolverIK(bone, model.bones.get(), model.bone_count, transformMatrices);
-            }
-        }
+        }*/
 
         GLint loc = glGetUniformLocation(shader.ID, "boneMatrices");
-        glUniformMatrix4fv(loc, 512, GL_FALSE, glm::value_ptr(boneMatrices[0]));
+        glUniformMatrix4fv(loc, 512, GL_FALSE, glm::value_ptr(transformMatrices[0]));
 
         glBindBuffer(GL_ARRAY_BUFFER, vbo);
         glBufferData(GL_ARRAY_BUFFER, gVertices.size() * sizeof(GLVertex), gVertices.data(), GL_STATIC_DRAW);
