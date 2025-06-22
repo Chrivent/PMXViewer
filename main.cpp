@@ -253,6 +253,44 @@ public:
                 << L", limitMax: (" << chain.limitMax.x << L", " << chain.limitMax.y << L", " << chain.limitMax.z << L")"
                 << std::endl;
         }
+
+        if (_effectorIndex < 0 || _targetIndex < 0 || _chains.empty())
+            return;
+
+        std::vector<glm::mat4> worldMatrices(localMatrices.size());
+
+        auto UpdateWorldMatrices = [&]() {
+            for (size_t i = 0; i < localMatrices.size(); ++i) {
+                int parent = (i < _chains.size()) ? _chains[i].boneIndex : -1;
+                if (parent >= 0 && parent < (int)localMatrices.size())
+                    worldMatrices[i] = worldMatrices[parent] * localMatrices[i];
+                else
+                    worldMatrices[i] = localMatrices[i];
+            }
+            };
+
+        float lastDistance = std::numeric_limits<float>::max();
+
+        for (int iter = 0; iter < _loopCount; ++iter) {
+            UpdateWorldMatrices();
+
+            SolveCore(iter, localMatrices, worldMatrices);
+
+            glm::vec3 effectorPos = glm::vec3(worldMatrices[_effectorIndex][3]);
+            glm::vec3 targetPos = glm::vec3(worldMatrices[_targetIndex][3]);
+            float dist = glm::length(targetPos - effectorPos);
+
+            if (dist < lastDistance) {
+                lastDistance = dist;
+            }
+            else {
+                break;
+            }
+        }
+    }
+
+    void SolveCore(int iteration, std::vector<glm::mat4>& local, const std::vector<glm::mat4>& world) {
+
     }
 
     bool IsEnabledAtFrame(int frameNo, const std::vector<const vmd::VmdIkFrame*>& keyframes) const {
