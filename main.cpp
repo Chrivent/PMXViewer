@@ -200,6 +200,88 @@ float BezierInterpolate(float x, glm::vec2 a, glm::vec2 b, int iter = 10, float 
     return t * t * t + 3 * t * t * r * b.y + 3 * t * r * r * a.y;
 }
 
+struct BonePose {
+    glm::vec3 position;
+    glm::quat orientation;
+};
+
+class IKSolver {
+private:
+    std::wstring _ikName;
+    int _effectorIndex;
+    int _targetIndex;
+    int _loopCount;
+    float _angleLimit;
+
+    struct Chain {
+        int boneIndex;
+        bool hasLimit;
+        glm::vec3 limitMin;
+        glm::vec3 limitMax;
+    };
+    std::vector<Chain> _chains;
+
+public:
+    IKSolver(const std::wstring& ikName, int effectorIdx, int targetIdx, int loopCount, float angleLimit) {
+        _ikName = ikName;
+        _effectorIndex = effectorIdx;
+        _targetIndex = targetIdx;
+        _loopCount = loopCount;
+        _angleLimit = angleLimit;
+    }
+
+    const std::wstring& GetName() const {
+        return _ikName;
+    }
+
+    void AddIKChain(int boneIndex, bool hasLimit, glm::vec3 limitMin, glm::vec3 limitMax) {
+        _chains.push_back({ boneIndex, hasLimit, limitMin, limitMax });
+    }
+
+    void Solve(std::vector<glm::mat4>& localMatrices) {
+        std::wcerr << L"[IKSolver] Solving IK: " << _ikName
+            << L" | effector: " << _effectorIndex
+            << L" -> target: " << _targetIndex
+            << L" | loop: " << _loopCount
+            << L" | chains: " << _chains.size() << std::endl;
+
+        for (size_t i = 0; i < _chains.size(); ++i) {
+            const auto& chain = _chains[i];
+            std::wcerr << L"  └─ Chain[" << i << L"] boneIndex: " << chain.boneIndex
+                << L", hasLimit: " << (chain.hasLimit ? L"true" : L"false")
+                << L", limitMin: (" << chain.limitMin.x << L", " << chain.limitMin.y << L", " << chain.limitMin.z << L")"
+                << L", limitMax: (" << chain.limitMax.x << L", " << chain.limitMax.y << L", " << chain.limitMax.z << L")"
+                << std::endl;
+        }
+    }
+
+    bool IsEnabledAtFrame(int frameNo, const std::vector<const vmd::VmdIkFrame*>& keyframes) const {
+        const vmd::VmdIkFrame* lastFrame = nullptr;
+        for (const auto* f : keyframes) {
+            if (f->frame > frameNo) break;
+            for (const auto& ik : f->ik_enable) {
+                std::wstring name;
+                oguna::EncodingConverter{}.Cp932ToUtf16(ik.ik_name.c_str(), (int)ik.ik_name.length(), &name);
+                if (name == _ikName) {
+                    lastFrame = f;
+                    break;
+                }
+            }
+        }
+
+        if (!lastFrame) return true;
+
+        for (const auto& ik : lastFrame->ik_enable) {
+            std::wstring name;
+            oguna::EncodingConverter{}.Cp932ToUtf16(ik.ik_name.c_str(), (int)ik.ik_name.length(), &name);
+            if (name == _ikName)
+                return ik.enable;
+        }
+
+        return true;
+    }
+};
+
 class Shader {
 public:
     GLuint ID;
@@ -567,10 +649,6 @@ int main()
 
     glBindVertexArray(0);
 
-    struct BonePose {
-        glm::vec3 position;
-        glm::quat orientation;
-    };
     unordered_map<wstring, BonePose> bonePoses;
     unordered_map<wstring, float> morphWeights;
 
@@ -608,6 +686,34 @@ int main()
     unordered_map<wstring, int> morphNameToIndex;
     for (int i = 0; i < model.morph_count; ++i)
         morphNameToIndex[model.morphs[i].morph_name] = i;
+
+    std::vector<std::unique_ptr<IKSolver>> ikSolvers;
+    for (int i = 0; i < model.bone_count; ++i) {
+        const auto& bone = model.bones[i];
+
+        if ((bone.bone_flag & 0x0020) != 0) {
+            auto solver = std::make_unique<IKSolver>(
+                bone.bone_name,
+                i,
+                bone.ik_target_bone_index,
+                bone.ik_loop,
+                bone.ik_loop_angle_limit
+            );
+
+            for (int j = 0; j < bone.ik_link_count; ++j) {
+                const auto& link = bone.ik_links[j];
+
+                solver->AddIKChain(
+                    link.link_target,
+                    link.angle_lock != 0,  // uint8_t → bool
+                    glm::make_vec3(link.min_radian),
+                    glm::make_vec3(link.max_radian)
+                );
+            }
+
+            ikSolvers.push_back(std::move(solver));
+        }
+    }
 
     // 루프
     while (!glfwWindowShouldClose(window)) {
@@ -745,12 +851,10 @@ int main()
             }
         }
 
-        for (int i = 0; i < model.bone_count; ++i) {
-            const auto& bone = model.bones[i];
-
-            if ((bone.bone_flag & 0x0020) != 0) {
-                std::wcerr << L"IK Bone Found: " << bone.bone_name << L" (index: " << i << ")\n";
-
+        for (auto& solver : ikSolvers) {
+            const auto& keyframes = ikKeyframes[solver->GetName()];
+            if (solver->IsEnabledAtFrame(currentFrame, keyframes)) {
+                solver->Solve(localMatrices);
             }
         }
 
