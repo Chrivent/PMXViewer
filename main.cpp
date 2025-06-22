@@ -47,8 +47,8 @@ double lastMouseX = 0.0, lastMouseY = 0.0;
 
 glm::vec3 cameraTarget = glm::vec3(0, 5, 0);
 
-float lightYaw = -45.0f;   // 초기 조명 방향 (degree)
-float lightPitch = 45.0f;
+float lightYaw = 45.0f;   // 초기 조명 방향 (degree)
+float lightPitch = -45.0f;
 bool leftMouseDown = false;
 
 void LoadTextures(const pmx::PmxModel& model, const string& pmxBaseDir) {
@@ -69,11 +69,9 @@ void LoadTextures(const pmx::PmxModel& model, const string& pmxBaseDir) {
         glGenTextures(1, &texID);
         glBindTexture(GL_TEXTURE_2D, texID);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
-        glGenerateMipmap(GL_TEXTURE_2D);
-
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
         gTextures[i] = texID;
@@ -183,13 +181,12 @@ void ApplyMorph(const pmx::PmxModel& model, vector<GLVertex>& vertices, vector<g
     }
 }
 
-float BezierInterpolate(const char curve[4], float t) {
-    float x1 = curve[0] / 127.0f;
-    float x2 = curve[1] / 127.0f;
-    float y1 = curve[2] / 127.0f;
-    float y2 = curve[3] / 127.0f;
+float BezierInterpolate(char x1, char x2, char y1, char y2, float t) {
+    float fx1 = x1 / 127.0f;
+    float fx2 = x2 / 127.0f;
+    float fy1 = y1 / 127.0f;
+    float fy2 = y2 / 127.0f;
 
-    // Cubic Bezier: P0=0, P1=(x1,y1), P2=(x2,y2), P3=1
     auto bezier = [](float t, float p0, float p1, float p2, float p3) {
         float it = 1.0f - t;
         return it * it * it * p0 +
@@ -198,22 +195,35 @@ float BezierInterpolate(const char curve[4], float t) {
             t * t * t * p3;
         };
 
-    // Newton-Raphson to find time t' where bezier(t').x ≈ t
     float left = 0.0f, right = 1.0f;
     float mid = 0.5f;
     for (int i = 0; i < 5; ++i) {
-        float x = bezier(mid, 0.0f, x1, x2, 1.0f);
+        float x = bezier(mid, 0.0f, fx1, fx2, 1.0f);
         if (x < t) left = mid;
         else       right = mid;
         mid = (left + right) * 0.5f;
     }
 
-    return bezier(mid, 0.0f, y1, y2, 1.0f);
+    return bezier(mid, 0.0f, fy1, fy2, 1.0f);
 }
 
-void SolverIK(const pmx::PmxBone& ikBone, const pmx::PmxBone* bones, int boneCount, std::vector<glm::mat4>& transformMatrices)
-{
+float GetYFromXOnBezier(float x, glm::vec2 a, glm::vec2 b, int iter = 10, float epsilon = 1e-5f) {
+    if (a.x == a.y && b.x == b.y)
+        return x;
 
+    float t = x;
+    float k0 = 1 + 3 * a.x - 3 * b.x;
+    float k1 = 3 * b.x - 6 * a.x;
+    float k2 = 3 * a.x;
+
+    for (int i = 0; i < iter; ++i) {
+        float ft = k0 * t * t * t + k1 * t * t + k2 * t - x;
+        if (fabs(ft) < epsilon) break;
+        t -= ft / 2.0f;  // 근사 방식
+    }
+
+    float r = 1 - t;
+    return t * t * t + 3 * t * t * r * b.y + 3 * t * r * r * a.y;
 }
 
 class Shader {
@@ -614,8 +624,6 @@ int main()
     for (int i = 0; i < model.morph_count; ++i)
         morphNameToIndex[model.morphs[i].morph_name] = i;
 
-    static float footOffsetY = 0.0f;
-    static float footOffsetX = 0.0f;
     // 루프
     while (!glfwWindowShouldClose(window)) {
         // 배경색 지정 및 지우기
@@ -668,9 +676,11 @@ int main()
         glUniform1i(glGetUniformLocation(shader.ID, "toonTex"), 1);
         glUniform1i(glGetUniformLocation(shader.ID, "sphereTex"), 2);
 
-        // 현재 시간 기반 프레임 계산
+        // 현재 시간 기반 프레임 계산 (애니메이션은 30fps 기준 시간축 사용)
         float time = static_cast<float>(glfwGetTime());
-        int currentFrame = static_cast<int>(time * 30.0f); // 30fps
+        float frameTime = time * 30.0f;                    // ⬅️ 실수형 시간
+        int currentFrame = static_cast<int>(frameTime);    // ⬅️ 정수 프레임 (예: 0~N)
+        float fraction = frameTime - currentFrame;         // ⬅️ 보간 잔여
 
         // 이전 프레임 상태 초기화
         copy(originalMaterials.begin(), originalMaterials.end(), model.materials.get());
@@ -692,32 +702,46 @@ int main()
             if (prev < 0 || next < 0) continue;
             const auto* f1 = frames[prev];
             const auto* f2 = frames[next];
-            float rawT = (currentFrame - f1->frame) / float(f2->frame - f1->frame);
 
-            // 보간 곡선 적용
-            float tx = BezierInterpolate(f1->interpolation[0][0], rawT);
-            float ty = BezierInterpolate(f1->interpolation[1][0], rawT);
-            float tz = BezierInterpolate(f1->interpolation[2][0], rawT);
-            float tr = BezierInterpolate(f1->interpolation[3][0], rawT);
+            float rawT = (frameTime - f1->frame) / float(f2->frame - f1->frame);
 
+            const uint8_t* interp = reinterpret_cast<const uint8_t*>(&f2->interpolation);
+
+            glm::vec2 p1x(interp[0], interp[1]);
+            glm::vec2 p2x(interp[8], interp[9]);
+            float tx = GetYFromXOnBezier(rawT, p1x / 127.0f, p2x / 127.0f, 12);
+
+            glm::vec2 p1y(interp[16], interp[17]);
+            glm::vec2 p2y(interp[24], interp[25]);
+            float ty = GetYFromXOnBezier(rawT, p1y / 127.0f, p2y / 127.0f, 12);
+
+            glm::vec2 p1z(interp[32], interp[33]);
+            glm::vec2 p2z(interp[40], interp[41]);
+            float tz = GetYFromXOnBezier(rawT, p1z / 127.0f, p2z / 127.0f, 12);
+
+            glm::vec2 p1r(interp[48], interp[49]);
+            glm::vec2 p2r(interp[56], interp[57]);
+            float tr = GetYFromXOnBezier(rawT, p1r / 127.0f, p2r / 127.0f, 12);
+
+            // 위치 보간
             glm::vec3 p1(f1->position[0], f1->position[1], f1->position[2]);
             glm::vec3 p2(f2->position[0], f2->position[1], f2->position[2]);
             glm::vec3 pos = glm::vec3(
-                glm::mix(p1.x, p2.x, tx),
-                glm::mix(p1.y, p2.y, ty),
-                glm::mix(p1.z, p2.z, tz)
+                glm::mix(p1.x, p2.x, glm::clamp(tx, 0.0f, 1.0f)),
+                glm::mix(p1.y, p2.y, glm::clamp(ty, 0.0f, 1.0f)),
+                glm::mix(p1.z, p2.z, glm::clamp(tz, 0.0f, 1.0f))
             );
 
+            // 회전 보간
             glm::quat q1(f1->orientation[3], f1->orientation[0], f1->orientation[1], f1->orientation[2]);
             glm::quat q2(f2->orientation[3], f2->orientation[0], f2->orientation[1], f2->orientation[2]);
-            glm::quat rot = glm::slerp(q1, q2, tr);
+            glm::quat rot = glm::slerp(q1, q2, glm::clamp(tr, 0.0f, 1.0f));
 
             BonePose pose;
             pose.position = pos;
             pose.orientation = rot;
-            memcpy(pose.interpolation, f1->interpolation, sizeof(char) * 4 * 4 * 4); // optional
 
-            //bonePoses[name] = pose;
+            bonePoses[name] = pose;
         }
 
         for (int i = 0; i < model.bone_count; ++i) {
@@ -727,13 +751,11 @@ int main()
 
             auto it = bonePoses.find(bone.bone_name);
             if (it != bonePoses.end()) {
-                // delta(애니/오프셋) 있는 본에만 적용
                 glm::mat4 Tanim = glm::translate(glm::mat4(1.0f), it->second.position);
                 glm::mat4 Ranim = glm::toMat4(it->second.orientation);
                 transformMatrices[i] = Trest * Tanim * Ranim * glm::inverse(Trest);
             }
             else {
-                // delta 없는 본은 변형 없다고 알려 주기 위해 Identity
                 transformMatrices[i] = glm::mat4(1.0f);
             }
         }
@@ -758,16 +780,18 @@ int main()
             }
         }
 
-        /*for (int i = 0; i < model.bone_count; ++i) {
+        //ApplyIK(model, transformMatrices, boneMatrices);
+
+        for (int i = 0; i < model.bone_count; ++i) {
             int parent = model.bones[i].parent_index;
             if (parent >= 0)
                 boneMatrices[i] = boneMatrices[parent] * transformMatrices[i];
             else
                 boneMatrices[i] = transformMatrices[i];
-        }*/
+        }
 
         GLint loc = glGetUniformLocation(shader.ID, "boneMatrices");
-        glUniformMatrix4fv(loc, 512, GL_FALSE, glm::value_ptr(transformMatrices[0]));
+        glUniformMatrix4fv(loc, 512, GL_FALSE, glm::value_ptr(boneMatrices[0]));
 
         glBindBuffer(GL_ARRAY_BUFFER, vbo);
         glBufferData(GL_ARRAY_BUFFER, gVertices.size() * sizeof(GLVertex), gVertices.data(), GL_STATIC_DRAW);
