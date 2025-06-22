@@ -410,6 +410,10 @@ int main()
         [](const vmd::VmdFaceFrame& a, const vmd::VmdFaceFrame& b) {
             return a.frame < b.frame;
         });
+    sort(motion->ik_frames.begin(), motion->ik_frames.end(),
+        [](const vmd::VmdIkFrame& a, const vmd::VmdIkFrame& b) {
+            return a.frame < b.frame;
+        });
 
     pmx::PmxModel model;
     ifstream file(pmxPath, ios::binary);
@@ -578,6 +582,7 @@ int main()
 
     unordered_map<wstring, vector<const vmd::VmdBoneFrame*>> boneKeyframes;
     unordered_map<wstring, vector<const vmd::VmdFaceFrame*>> faceKeyframes;
+    unordered_map<wstring, vector<const vmd::VmdIkFrame*>> ikKeyframes;
 
     for (const auto& f : motion->bone_frames) {
         wstring name;
@@ -588,6 +593,13 @@ int main()
         wstring name;
         oguna::EncodingConverter{}.Cp932ToUtf16(f.face_name.c_str(), (int)f.face_name.length(), &name);
         faceKeyframes[name].push_back(&f);
+    }
+    for (const auto& f : motion->ik_frames) {
+        for (const auto& ik : f.ik_enable) {
+            wstring name;
+            oguna::EncodingConverter{}.Cp932ToUtf16(ik.ik_name.c_str(), (int)ik.ik_name.length(), &name);
+            ikKeyframes[name].push_back(&f);
+        }
     }
 
     vector<glm::mat4> globalMatrices(model.bone_count);
@@ -714,7 +726,7 @@ int main()
             pose.position = pos;
             pose.orientation = rot;
 
-            //bonePoses[name] = pose;
+            bonePoses[name] = pose;
         }
 
         for (int i = 0; i < model.bone_count; ++i) {
@@ -739,7 +751,6 @@ int main()
             if ((bone.bone_flag & 0x0020) != 0) {
                 std::wcerr << L"IK Bone Found: " << bone.bone_name << L" (index: " << i << ")\n";
 
-                // IK 관련 처리 추가 가능
             }
         }
 
