@@ -205,19 +205,16 @@ struct BonePose {
     glm::vec3 position;
     glm::quat orientation;
 };
-
 void Decompose(const glm::mat4& mat, glm::vec3& outPos, glm::vec3& outEuler) {
     outPos = glm::vec3(mat[3]);
     glm::quat rot = glm::quat_cast(mat);
     outEuler = glm::eulerAngles(rot);
 }
-
 glm::mat4 ComposeTransform(const glm::vec3& pos, const glm::vec3& euler) {
     glm::mat4 T = glm::translate(glm::mat4(1.0f), pos);
     glm::mat4 R = glm::eulerAngleXYZ(euler.x, euler.y, euler.z);
     return T * R;
 }
-
 class IKSolver {
 private:
     std::wstring _ikName;
@@ -225,7 +222,6 @@ private:
     int _targetIndex;
     int _loopCount;
     float _angleLimit;
-
     struct Chain {
         int boneIndex;
         bool hasLimit;
@@ -235,7 +231,6 @@ private:
     std::vector<Chain> _chains;
     std::vector<int> _parentIndices;
     std::vector<glm::vec3> _restPivots;
-
 public:
     IKSolver(const std::wstring& ikName, int effectorIdx, int targetIdx, int loopCount, float angleLimit, const std::vector<int>& parentIndices, const std::vector<glm::vec3>& restPivots) {
         _ikName = ikName;
@@ -246,118 +241,94 @@ public:
         _parentIndices = parentIndices;
         _restPivots = restPivots;
     }
-
     const std::wstring& GetName() const {
         return _ikName;
     }
-
     void AddIKChain(int boneIndex, bool hasLimit, glm::vec3 limitMin, glm::vec3 limitMax) {
         _chains.push_back({ boneIndex, hasLimit, limitMin, limitMax });
     }
-
     void Solve(std::vector<glm::mat4>& localMatrices) {
         for (size_t i = 0; i < _chains.size(); ++i) {
             const auto& chain = _chains[i];
         }
-
         if (_effectorIndex < 0 || _targetIndex < 0 || _chains.empty())
             return;
-
         std::vector<glm::mat4> worldMatrices(localMatrices.size());
-
-        auto UpdateWorldMatrices = [&]() {
+        worldMatrices = localMatrices;
+        auto UpdateWorld = [&]() {
             for (size_t i = 0; i < localMatrices.size(); ++i) {
-                int parent = _parentIndices[i];
-                if (parent >= 0 && parent < (int)localMatrices.size())
-                    worldMatrices[i] = worldMatrices[parent] * localMatrices[i];
-                else
-                    worldMatrices[i] = localMatrices[i];
+                int p = _parentIndices[i];
+                worldMatrices[i] = (p >= 0)
+                    ? worldMatrices[p] * localMatrices[i]
+                    : localMatrices[i];
             }
             };
-
-        float lastDistance = std::numeric_limits<float>::max();
+        float lastDist = std::numeric_limits<float>::max();
         for (int iter = 0; iter < _loopCount; ++iter) {
-            UpdateWorldMatrices();
-            SolveCore(iter, localMatrices, worldMatrices);
-
-            glm::vec3 effectorPos = glm::vec3(worldMatrices[_effectorIndex][3]);
-            glm::vec3 targetPos = glm::vec3(worldMatrices[_targetIndex][3]);
-            float dist = glm::length(targetPos - effectorPos);
-
-            if (dist < lastDistance) {
-                lastDistance = dist;
+            for (size_t ci = 0; ci < _chains.size(); ++ci) {
+                UpdateWorld();
+                SolveOneLink(ci, localMatrices, worldMatrices);
             }
-            else {
-                break;
-            }
+            UpdateWorld();
+            glm::vec3 e = glm::vec3(worldMatrices[_effectorIndex][3]);
+            glm::vec3 t = glm::vec3(worldMatrices[_targetIndex][3]);
+            float dist = glm::length(t - e);
+            if (dist >= lastDist) break;
+            lastDist = dist;
         }
     }
-
     enum class SolveAxis
     {
         X,
         Y,
         Z
     };
-
-    void SolveCore(int iteration, std::vector<glm::mat4>& local, const std::vector<glm::mat4>& world) {
-        for (size_t i = 0; i < _chains.size(); ++i) {
-            const auto& chain = _chains[i];
-            int boneIndex = chain.boneIndex;
-            if (boneIndex < 0 || boneIndex >= (int)local.size())
-                continue;
-
-            glm::mat4 invChainWorld = glm::inverse(world[boneIndex]);
-            glm::vec3 effectorPos = glm::vec3(invChainWorld * world[_effectorIndex][3]);
-            glm::vec3 targetPos = glm::vec3(invChainWorld * world[_targetIndex][3]);
-
-            glm::vec3 axis = glm::cross(effectorPos, targetPos);
-            float dot = glm::dot(glm::normalize(effectorPos), glm::normalize(targetPos));
-            dot = glm::clamp(dot, -1.0f, 1.0f);
-            float angle = std::acos(dot);
-            if (glm::length(axis) < 1e-4 || angle < 1e-4f)
-                continue;
-            angle = glm::min(angle, _angleLimit);
-
-            bool limitX = chain.limitMin.x != chain.limitMax.x;
-            bool limitY = chain.limitMin.y != chain.limitMax.y;
-            bool limitZ = chain.limitMin.z != chain.limitMax.z;
-            int axisCount = (limitX ? 1 : 0) + (limitY ? 1 : 0) + (limitZ ? 1 : 0);
-
-            if (chain.hasLimit && axisCount == 1) {
-                if (limitX) { SolvePlane(iteration, i, local, world, SolveAxis::X); continue; }
-                if (limitY) { SolvePlane(iteration, i, local, world, SolveAxis::Y); continue; }
-                if (limitZ) { SolvePlane(iteration, i, local, world, SolveAxis::Z); continue; }
-            }
-
-            glm::quat deltaRot = glm::angleAxis(angle, glm::normalize(axis));
-            glm::mat4 R = glm::toMat4(deltaRot);
-
-            glm::vec3 pivot = _restPivots[boneIndex];
-            glm::mat4 Trest = glm::translate(glm::mat4(1.0f), pivot);
-            glm::mat4 iTrest = glm::inverse(Trest);
-            local[boneIndex] = Trest * R * iTrest * local[boneIndex];
-
-            if (chain.hasLimit) {
-                glm::vec3 pos, euler;
-                Decompose(local[boneIndex], pos, euler);
-                euler = glm::clamp(euler, chain.limitMin, chain.limitMax);
-                local[boneIndex] = ComposeTransform(pos, euler);
-            }
+    void SolveOneLink(int chainIndex,
+        std::vector<glm::mat4>& local,
+        const std::vector<glm::mat4>& world)
+    {
+        const auto& chain = _chains[chainIndex];
+        int bi = chain.boneIndex;
+        if (bi < 0 || bi >= (int)local.size()) return;
+        glm::mat4 invChainWorld = glm::inverse(world[bi]);
+        glm::vec3 eff = glm::vec3(invChainWorld * world[_effectorIndex][3]);
+        glm::vec3 tgt = glm::vec3(invChainWorld * world[_targetIndex][3]);
+        glm::vec3 axis = glm::cross(eff, tgt);
+        float dot = glm::clamp(glm::dot(glm::normalize(eff), glm::normalize(tgt)), -1.0f, 1.0f);
+        float angle = std::acos(dot);
+        if (glm::length(axis) < 1e-4f || angle < 1e-4f) return;
+        angle = glm::min(angle, _angleLimit);
+        bool limitX = chain.limitMin.x != chain.limitMax.x;
+        bool limitY = chain.limitMin.y != chain.limitMax.y;
+        bool limitZ = chain.limitMin.z != chain.limitMax.z;
+        int  cnt = (limitX ? 1 : 0) + (limitY ? 1 : 0) + (limitZ ? 1 : 0);
+        if (chain.hasLimit && cnt == 1) {
+            if (limitX) { SolvePlane(chainIndex, local, world, SolveAxis::X); return; }
+            if (limitY) { SolvePlane(chainIndex, local, world, SolveAxis::Y); return; }
+            if (limitZ) { SolvePlane(chainIndex, local, world, SolveAxis::Z); return; }
+        }
+        glm::vec3 pivot = _restPivots[bi];
+        glm::mat4 Trest = glm::translate(glm::mat4(1.0f), pivot);
+        glm::mat4 iTrest = glm::inverse(Trest);
+        glm::mat4 Mdebake = iTrest * local[bi];
+        glm::quat deltaQ = glm::angleAxis(angle, glm::normalize(axis));
+        glm::mat4 Rdelta = glm::toMat4(deltaQ);
+        local[bi] = Trest * Rdelta * Mdebake;
+        if (chain.hasLimit) {
+            glm::mat4 M2 = iTrest * local[bi];
+            glm::vec3 pos, euler;
+            Decompose(M2, pos, euler);
+            euler = glm::clamp(euler, chain.limitMin, chain.limitMax);
+            glm::mat4 Mlimit = Trest * ComposeTransform(pos, euler) * iTrest * local[bi];
+            local[bi] = Mlimit;
         }
     }
-
-    void SolvePlane(int iteration,
-        int chainIndex,
-        std::vector<glm::mat4>& local,
-        const std::vector<glm::mat4>& world,
-        SolveAxis axis)
+    void SolvePlane(int chainIndex, std::vector<glm::mat4>& local, const std::vector<glm::mat4>& world, SolveAxis axis)
     {
         int boneIndex = _chains[chainIndex].boneIndex;
         glm::mat4 invWorld = glm::inverse(world[boneIndex]);
         glm::vec3 effector = glm::vec3(invWorld * world[_effectorIndex][3]);
         glm::vec3 target = glm::vec3(invWorld * world[_targetIndex][3]);
-
         glm::vec2 vFrom, vTo;
         if (axis == SolveAxis::X) {
             vFrom = glm::vec2(effector.y, effector.z);
@@ -371,19 +342,14 @@ public:
             vFrom = glm::vec2(effector.x, effector.y);
             vTo = glm::vec2(target.x, target.y);
         }
-
         if (glm::length(vFrom) < 1e-5f || glm::length(vTo) < 1e-5f) return;
         vFrom = glm::normalize(vFrom);
         vTo = glm::normalize(vTo);
-
         float cosA = glm::clamp(glm::dot(vFrom, vTo), -1.0f, 1.0f);
         float angle = std::acos(cosA);
-
         float cross2d = vFrom.x * vTo.y - vFrom.y * vTo.x;
         angle *= (cross2d < 0 ? -1.0f : 1.0f);
-
         angle = glm::clamp(angle, -_angleLimit, _angleLimit);
-
         glm::vec3 pos, euler;
         Decompose(local[boneIndex], pos, euler);
         if (axis == SolveAxis::X) euler.x += angle;
@@ -391,7 +357,6 @@ public:
         if (axis == SolveAxis::Z) euler.z += angle;
         local[boneIndex] = ComposeTransform(pos, euler);
     }
-
     bool IsEnabledAtFrame(int frameNo, const std::vector<const vmd::VmdIkFrame*>& keyframes) const {
         const vmd::VmdIkFrame* lastFrame = nullptr;
         for (const auto* f : keyframes) {
@@ -405,16 +370,13 @@ public:
                 }
             }
         }
-
         if (!lastFrame) return true;
-
         for (const auto& ik : lastFrame->ik_enable) {
             std::wstring name;
             oguna::EncodingConverter{}.Cp932ToUtf16(ik.ik_name.c_str(), (int)ik.ik_name.length(), &name);
             if (name == _ikName)
                 return ik.enable;
         }
-
         return true;
     }
 };
@@ -993,7 +955,7 @@ int main()
             if (it != bonePoses.end()) {
                 glm::mat4 Tanim = glm::translate(glm::mat4(1.0f), it->second.position);
                 glm::mat4 Ranim = glm::toMat4(it->second.orientation);
-                localMatrices[i] = Trest * Tanim * Ranim * glm::inverse(Trest);
+                localMatrices[i] = Trest * Tanim * Ranim * inverse(Trest);
             }
             else {
                 localMatrices[i] = glm::mat4(1.0f);
@@ -1029,6 +991,14 @@ int main()
             }
         }
 
+        for (int i = 0; i < model.bone_count; ++i) {
+            int parent = model.bones[i].parent_index;
+            if (parent >= 0)
+                globalMatrices[i] = globalMatrices[parent] * localMatrices[i];
+            else
+                globalMatrices[i] = localMatrices[i];
+        }
+
         for (auto& solver : ikSolvers) {
             const auto& keyframes = ikKeyframes[solver->GetName()];
             if (solver->IsEnabledAtFrame(currentFrame, keyframes)) {
@@ -1054,14 +1024,6 @@ int main()
             if (it != morphNameToIndex.end()) {
                 ApplyMorph(model, gVertices, localMatrices, it->second, weight);
             }
-        }
-
-        for (int i = 0; i < model.bone_count; ++i) {
-            int parent = model.bones[i].parent_index;
-            if (parent >= 0)
-                globalMatrices[i] = globalMatrices[parent] * localMatrices[i];
-            else
-                globalMatrices[i] = localMatrices[i];
         }
 
         GLint loc = glGetUniformLocation(shader.ID, "boneMatrices");
