@@ -79,7 +79,7 @@ void LoadTextures(const pmx::PmxModel& model, const string& pmxBaseDir) {
     }
 }
 
-void ApplyMorph(const pmx::PmxModel& model, vector<GLVertex>& vertices, vector<glm::mat4>& transformMatrices, int morphIndex, float weight) {
+void ApplyMorph(const pmx::PmxModel& model, vector<GLVertex>& vertices, vector<glm::mat4>& localMatrices, int morphIndex, float weight) {
     if (morphIndex < 0 || morphIndex >= model.morph_count) return;
 
     const auto& morph = model.morphs[morphIndex];
@@ -147,7 +147,7 @@ void ApplyMorph(const pmx::PmxModel& model, vector<GLVertex>& vertices, vector<g
         for (int i = 0; i < morph.offset_count; ++i) {
             const auto& offset = morph.bone_offsets[i];
             int bi = offset.bone_index;
-            if (bi < 0 || bi >= static_cast<int>(transformMatrices.size())) continue;
+            if (bi < 0 || bi >= static_cast<int>(localMatrices.size())) continue;
 
             const auto& bone = model.bones[bi];
             glm::vec3 pivot(bone.position[0], bone.position[1], bone.position[2]);
@@ -165,14 +165,14 @@ void ApplyMorph(const pmx::PmxModel& model, vector<GLVertex>& vertices, vector<g
                 * glm::translate(glm::mat4(1.0f), -pivot);
 
             // 기존 local 행렬에 적용
-            transformMatrices[bi] = morphMat * transformMatrices[bi];
+            localMatrices[bi] = morphMat * localMatrices[bi];
         }
         break;
 
     case pmx::MorphType::Group:
         for (int i = 0; i < morph.offset_count; ++i) {
             const auto& group = morph.group_offsets[i];
-            ApplyMorph(model, vertices, transformMatrices, group.morph_index, group.morph_weight * weight);
+            ApplyMorph(model, vertices, localMatrices, group.morph_index, group.morph_weight * weight);
         }
         break;
 
@@ -181,33 +181,7 @@ void ApplyMorph(const pmx::PmxModel& model, vector<GLVertex>& vertices, vector<g
     }
 }
 
-float BezierInterpolate(char x1, char x2, char y1, char y2, float t) {
-    float fx1 = x1 / 127.0f;
-    float fx2 = x2 / 127.0f;
-    float fy1 = y1 / 127.0f;
-    float fy2 = y2 / 127.0f;
-
-    auto bezier = [](float t, float p0, float p1, float p2, float p3) {
-        float it = 1.0f - t;
-        return it * it * it * p0 +
-            3.0f * it * it * t * p1 +
-            3.0f * it * t * t * p2 +
-            t * t * t * p3;
-        };
-
-    float left = 0.0f, right = 1.0f;
-    float mid = 0.5f;
-    for (int i = 0; i < 5; ++i) {
-        float x = bezier(mid, 0.0f, fx1, fx2, 1.0f);
-        if (x < t) left = mid;
-        else       right = mid;
-        mid = (left + right) * 0.5f;
-    }
-
-    return bezier(mid, 0.0f, fy1, fy2, 1.0f);
-}
-
-float GetYFromXOnBezier(float x, glm::vec2 a, glm::vec2 b, int iter = 10, float epsilon = 1e-5f) {
+float BezierInterpolate(float x, glm::vec2 a, glm::vec2 b, int iter = 10, float epsilon = 1e-5f) {
     if (a.x == a.y && b.x == b.y)
         return x;
 
@@ -617,8 +591,8 @@ int main()
         faceKeyframes[name].push_back(&f);
     }
 
-    vector<glm::mat4> boneMatrices(model.bone_count);
-    vector<glm::mat4> transformMatrices(model.bone_count);
+    vector<glm::mat4> globalMatrices(model.bone_count);
+    vector<glm::mat4> localMatrices(model.bone_count);
 
     unordered_map<wstring, int> morphNameToIndex;
     for (int i = 0; i < model.morph_count; ++i)
@@ -709,19 +683,19 @@ int main()
 
             glm::vec2 p1x(interp[0], interp[1]);
             glm::vec2 p2x(interp[8], interp[9]);
-            float tx = GetYFromXOnBezier(rawT, p1x / 127.0f, p2x / 127.0f, 12);
+            float tx = BezierInterpolate(rawT, p1x / 127.0f, p2x / 127.0f, 12);
 
             glm::vec2 p1y(interp[16], interp[17]);
             glm::vec2 p2y(interp[24], interp[25]);
-            float ty = GetYFromXOnBezier(rawT, p1y / 127.0f, p2y / 127.0f, 12);
+            float ty = BezierInterpolate(rawT, p1y / 127.0f, p2y / 127.0f, 12);
 
             glm::vec2 p1z(interp[32], interp[33]);
             glm::vec2 p2z(interp[40], interp[41]);
-            float tz = GetYFromXOnBezier(rawT, p1z / 127.0f, p2z / 127.0f, 12);
+            float tz = BezierInterpolate(rawT, p1z / 127.0f, p2z / 127.0f, 12);
 
             glm::vec2 p1r(interp[48], interp[49]);
             glm::vec2 p2r(interp[56], interp[57]);
-            float tr = GetYFromXOnBezier(rawT, p1r / 127.0f, p2r / 127.0f, 12);
+            float tr = BezierInterpolate(rawT, p1r / 127.0f, p2r / 127.0f, 12);
 
             // 위치 보간
             glm::vec3 p1(f1->position[0], f1->position[1], f1->position[2]);
@@ -753,10 +727,10 @@ int main()
             if (it != bonePoses.end()) {
                 glm::mat4 Tanim = glm::translate(glm::mat4(1.0f), it->second.position);
                 glm::mat4 Ranim = glm::toMat4(it->second.orientation);
-                transformMatrices[i] = Trest * Tanim * Ranim * glm::inverse(Trest);
+                localMatrices[i] = Trest * Tanim * Ranim * glm::inverse(Trest);
             }
             else {
-                transformMatrices[i] = glm::mat4(1.0f);
+                localMatrices[i] = glm::mat4(1.0f);
             }
         }
 
@@ -776,7 +750,7 @@ int main()
         for (const auto& [name, weight] : morphWeights) {
             auto it = morphNameToIndex.find(name);
             if (it != morphNameToIndex.end()) {
-                ApplyMorph(model, gVertices, transformMatrices, it->second, weight);
+                ApplyMorph(model, gVertices, localMatrices, it->second, weight);
             }
         }
 
@@ -785,13 +759,13 @@ int main()
         for (int i = 0; i < model.bone_count; ++i) {
             int parent = model.bones[i].parent_index;
             if (parent >= 0)
-                boneMatrices[i] = boneMatrices[parent] * transformMatrices[i];
+                globalMatrices[i] = globalMatrices[parent] * localMatrices[i];
             else
-                boneMatrices[i] = transformMatrices[i];
+                globalMatrices[i] = localMatrices[i];
         }
 
         GLint loc = glGetUniformLocation(shader.ID, "boneMatrices");
-        glUniformMatrix4fv(loc, 512, GL_FALSE, glm::value_ptr(boneMatrices[0]));
+        glUniformMatrix4fv(loc, 512, GL_FALSE, glm::value_ptr(globalMatrices[0]));
 
         glBindBuffer(GL_ARRAY_BUFFER, vbo);
         glBufferData(GL_ARRAY_BUFFER, gVertices.size() * sizeof(GLVertex), gVertices.data(), GL_STATIC_DRAW);
