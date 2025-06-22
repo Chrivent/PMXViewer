@@ -206,6 +206,26 @@ struct BonePose {
     glm::quat orientation;
 };
 
+void Decompose(const glm::mat4& mat, glm::vec3& outPos, glm::vec3& outEuler) {
+    outPos = glm::vec3(mat[3]);
+
+    glm::quat rot = glm::quat_cast(mat);
+    outEuler = glm::eulerAngles(rot);
+
+    std::wcerr << L"[Decompose] position: (" << outPos.x << L", " << outPos.y << L", " << outPos.z << L")"
+        << L" | euler: (" << outEuler.x << L", " << outEuler.y << L", " << outEuler.z << L")" << std::endl;
+}
+
+glm::mat4 ComposeTransform(const glm::vec3& pos, const glm::vec3& euler) {
+    std::wcerr << L"[Compose] position: (" << pos.x << L", " << pos.y << L", " << pos.z << L")"
+        << L" | euler: (" << euler.x << L", " << euler.y << L", " << euler.z << L")" << std::endl;
+
+    glm::mat4 T = glm::translate(glm::mat4(1.0f), pos);
+    glm::mat4 R = glm::yawPitchRoll(euler.y, euler.x, euler.z);
+
+    return T * R;
+}
+
 class IKSolver {
 private:
     std::wstring _ikName;
@@ -423,25 +443,6 @@ public:
         if (axis == SolveAxis::Z) euler.z += angle;
 
         local[boneIndex] = ComposeTransform(pos, euler);
-    }
-
-    void Decompose(const glm::mat4& mat, glm::vec3& outPos, glm::vec3& outEuler) {
-        outPos = glm::vec3(mat[3]);
-
-        glm::quat rot = glm::quat_cast(mat);
-        outEuler = glm::eulerAngles(rot);
-
-        std::wcerr << L"[Decompose] position: (" << outPos.x << L", " << outPos.y << L", " << outPos.z << L")"
-            << L" | euler: (" << outEuler.x << L", " << outEuler.y << L", " << outEuler.z << L")" << std::endl;
-    }
-    glm::mat4 ComposeTransform(const glm::vec3& pos, const glm::vec3& euler) {
-        std::wcerr << L"[Compose] position: (" << pos.x << L", " << pos.y << L", " << pos.z << L")"
-            << L" | euler: (" << euler.x << L", " << euler.y << L", " << euler.z << L")" << std::endl;
-
-        glm::mat4 T = glm::translate(glm::mat4(1.0f), pos);
-        glm::mat4 R = glm::yawPitchRoll(euler.y, euler.x, euler.z);
-
-        return T * R;
     }
 
     bool IsEnabledAtFrame(int frameNo, const std::vector<const vmd::VmdIkFrame*>& keyframes) const {
@@ -1037,6 +1038,35 @@ int main()
             }
             else {
                 localMatrices[i] = glm::mat4(1.0f);
+            }
+        }
+
+        for (int i = 0; i < model.bone_count; ++i) {
+            const auto& bone = model.bones[i];
+
+            if ((bone.bone_flag & 0x0100) && (bone.bone_flag & (0x0200 | 0x0400))) {
+                int parentIdx = bone.grant_parent_index;
+                float weight = bone.grant_weight;
+
+                glm::vec3 pos, euler;
+                Decompose(localMatrices[i], pos, euler);
+
+                if (bone.bone_flag & 0x0200) {
+                    glm::quat parentRot = glm::quat_cast(localMatrices[parentIdx]);
+                    glm::quat selfRot = glm::quat_cast(localMatrices[i]);
+                    glm::quat mixed = glm::slerp(selfRot, parentRot * selfRot, weight);
+                    glm::mat4 rot = glm::toMat4(mixed);
+
+                    localMatrices[i] = glm::translate(glm::mat4(1.0f), pos) * rot;
+                }
+
+                if (bone.bone_flag & 0x0400) {
+                    glm::vec3 appendPos = glm::vec3(localMatrices[parentIdx][3]);
+                    pos += appendPos * weight;
+
+                    glm::quat rot = glm::quat_cast(localMatrices[i]);
+                    localMatrices[i] = glm::translate(glm::mat4(1.0f), pos) * glm::toMat4(rot);
+                }
             }
         }
 
