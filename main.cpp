@@ -208,21 +208,13 @@ struct BonePose {
 
 void Decompose(const glm::mat4& mat, glm::vec3& outPos, glm::vec3& outEuler) {
     outPos = glm::vec3(mat[3]);
-
     glm::quat rot = glm::quat_cast(mat);
     outEuler = glm::eulerAngles(rot);
-
-    std::wcerr << L"[Decompose] position: (" << outPos.x << L", " << outPos.y << L", " << outPos.z << L")"
-        << L" | euler: (" << outEuler.x << L", " << outEuler.y << L", " << outEuler.z << L")" << std::endl;
 }
 
 glm::mat4 ComposeTransform(const glm::vec3& pos, const glm::vec3& euler) {
-    std::wcerr << L"[Compose] position: (" << pos.x << L", " << pos.y << L", " << pos.z << L")"
-        << L" | euler: (" << euler.x << L", " << euler.y << L", " << euler.z << L")" << std::endl;
-
     glm::mat4 T = glm::translate(glm::mat4(1.0f), pos);
     glm::mat4 R = glm::yawPitchRoll(euler.y, euler.x, euler.z);
-
     return T * R;
 }
 
@@ -260,19 +252,8 @@ public:
     }
 
     void Solve(std::vector<glm::mat4>& localMatrices) {
-        std::wcerr << L"[IKSolver] Solving IK: " << _ikName
-            << L" | effector: " << _effectorIndex
-            << L" -> target: " << _targetIndex
-            << L" | loop: " << _loopCount
-            << L" | chains: " << _chains.size() << std::endl;
-
         for (size_t i = 0; i < _chains.size(); ++i) {
             const auto& chain = _chains[i];
-            std::wcerr << L"  └─ Chain[" << i << L"] boneIndex: " << chain.boneIndex
-                << L", hasLimit: " << (chain.hasLimit ? L"true" : L"false")
-                << L", limitMin: (" << chain.limitMin.x << L", " << chain.limitMin.y << L", " << chain.limitMin.z << L")"
-                << L", limitMax: (" << chain.limitMax.x << L", " << chain.limitMax.y << L", " << chain.limitMax.z << L")"
-                << std::endl;
         }
 
         if (_effectorIndex < 0 || _targetIndex < 0 || _chains.empty())
@@ -318,13 +299,8 @@ public:
     };
 
     void SolveCore(int iteration, std::vector<glm::mat4>& local, const std::vector<glm::mat4>& world) {
-        std::wcerr << L"    [SolveCore] iteration: " << iteration << std::endl;
-
         for (size_t i = 0; i < _chains.size(); ++i) {
             const auto& chain = _chains[i];
-            std::wcerr << L"      └─ Chain[" << i << L"] boneIndex: " << chain.boneIndex
-                << L" | hasLimit: " << (chain.hasLimit ? L"true" : L"false") << std::endl;
-
             int boneIndex = chain.boneIndex;
 
             if (boneIndex < 0 || boneIndex >= (int)local.size())
@@ -339,10 +315,8 @@ public:
             dot = glm::clamp(dot, -1.0f, 1.0f);
             float angle = std::acos(dot);
 
-            if (glm::length(axis) < 1e-4 || angle < 1e-4f) {
-                std::wcerr << L"        > Skipping due to small axis/angle" << std::endl;
+            if (glm::length(axis) < 1e-4 || angle < 1e-4f)
                 continue;
-            }
 
             angle = glm::min(angle, _angleLimit);
 
@@ -350,10 +324,6 @@ public:
             glm::mat4 R = glm::toMat4(deltaRot);
 
             local[boneIndex] = local[boneIndex] * R;
-
-            std::wcerr << L"        > effectorPos: (" << effectorPos.x << L", " << effectorPos.y << L", " << effectorPos.z << L")"
-                << L" | targetPos: (" << targetPos.x << L", " << targetPos.y << L", " << targetPos.z << L")"
-                << L" | angle: " << angle << L" | axisLen: " << glm::length(axis) << std::endl;
 
             if (chain.hasLimit) {
                 bool limitX = chain.limitMin.x != chain.limitMax.x;
@@ -386,17 +356,6 @@ public:
         const std::vector<glm::mat4>& world,
         SolveAxis axis)
     {
-        std::wcerr << L"[SolvePlane] iteration: " << iteration
-            << L" | chainIndex: " << chainIndex
-            << L" | axis: ";
-        switch (axis) {
-        case SolveAxis::X: std::wcerr << L"X"; break;
-        case SolveAxis::Y: std::wcerr << L"Y"; break;
-        case SolveAxis::Z: std::wcerr << L"Z"; break;
-        default:           std::wcerr << L"(unknown)"; break;
-        }
-        std::wcerr << std::endl;
-
         if (chainIndex < 0 || chainIndex >= (int)_chains.size())
             return;
 
