@@ -714,7 +714,7 @@ int main()
             pose.position = pos;
             pose.orientation = rot;
 
-            bonePoses[name] = pose;
+            //bonePoses[name] = pose;
         }
 
         for (int i = 0; i < model.bone_count; ++i) {
@@ -730,6 +730,16 @@ int main()
             }
             else {
                 localMatrices[i] = glm::mat4(1.0f);
+            }
+        }
+
+        for (int i = 0; i < model.bone_count; ++i) {
+            const auto& bone = model.bones[i];
+
+            if ((bone.bone_flag & 0x0020) != 0) {
+                std::wcerr << L"IK Bone Found: " << bone.bone_name << L" (index: " << i << ")\n";
+
+                // IK 관련 처리 추가 가능
             }
         }
 
