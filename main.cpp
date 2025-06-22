@@ -566,7 +566,6 @@ int main()
     struct BonePose {
         glm::vec3 position;
         glm::quat orientation;
-        char interpolation[4][4][4];
     };
     unordered_map<wstring, BonePose> bonePoses;
     unordered_map<wstring, float> morphWeights;
@@ -753,8 +752,6 @@ int main()
                 ApplyMorph(model, gVertices, localMatrices, it->second, weight);
             }
         }
-
-        //ApplyIK(model, transformMatrices, boneMatrices);
 
         for (int i = 0; i < model.bone_count; ++i) {
             int parent = model.bones[i].parent_index;
