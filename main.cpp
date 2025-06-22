@@ -16,6 +16,7 @@
 #include <glm/gtc/type_ptr.hpp>
 #include <glm/gtx/quaternion.hpp>
 #include <glm/gtx/string_cast.hpp>
+#include <glm/gtx/euler_angles.hpp>
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
@@ -289,8 +290,158 @@ public:
         }
     }
 
-    void SolveCore(int iteration, std::vector<glm::mat4>& local, const std::vector<glm::mat4>& world) {
+    enum class SolveAxis
+    {
+        X,
+        Y,
+        Z
+    };
 
+    void SolveCore(int iteration, std::vector<glm::mat4>& local, const std::vector<glm::mat4>& world) {
+        std::wcerr << L"    [SolveCore] iteration: " << iteration << std::endl;
+
+        for (size_t i = 0; i < _chains.size(); ++i) {
+            const auto& chain = _chains[i];
+            std::wcerr << L"      └─ Chain[" << i << L"] boneIndex: " << chain.boneIndex
+                << L" | hasLimit: " << (chain.hasLimit ? L"true" : L"false") << std::endl;
+
+            int boneIndex = chain.boneIndex;
+
+            if (boneIndex < 0 || boneIndex >= (int)local.size())
+                continue;
+
+            glm::mat4 invChainWorld = glm::inverse(world[boneIndex]);
+            glm::vec3 effectorPos = glm::vec3(invChainWorld * world[_effectorIndex][3]);
+            glm::vec3 targetPos = glm::vec3(invChainWorld * world[_targetIndex][3]);
+
+            glm::vec3 axis = glm::cross(effectorPos, targetPos);
+            float dot = glm::dot(glm::normalize(effectorPos), glm::normalize(targetPos));
+            dot = glm::clamp(dot, -1.0f, 1.0f);
+            float angle = std::acos(dot);
+
+            if (glm::length(axis) < 1e-4 || angle < 1e-4f) {
+                std::wcerr << L"        > Skipping due to small axis/angle" << std::endl;
+                continue;
+            }
+
+            angle = glm::min(angle, _angleLimit);
+
+            glm::quat deltaRot = glm::angleAxis(angle, glm::normalize(axis));
+            glm::mat4 R = glm::toMat4(deltaRot);
+
+            local[boneIndex] = local[boneIndex] * R;
+
+            std::wcerr << L"        > effectorPos: (" << effectorPos.x << L", " << effectorPos.y << L", " << effectorPos.z << L")"
+                << L" | targetPos: (" << targetPos.x << L", " << targetPos.y << L", " << targetPos.z << L")"
+                << L" | angle: " << angle << L" | axisLen: " << glm::length(axis) << std::endl;
+
+            if (chain.hasLimit) {
+                bool limitX = chain.limitMin.x != chain.limitMax.x;
+                bool limitY = chain.limitMin.y != chain.limitMax.y;
+                bool limitZ = chain.limitMin.z != chain.limitMax.z;
+
+                int axisCount = (limitX ? 1 : 0) + (limitY ? 1 : 0) + (limitZ ? 1 : 0);
+
+                if (axisCount == 1) {
+                    if (limitX) {
+                        SolvePlane(iteration, i, local, world, SolveAxis::X);
+                        continue;
+                    }
+                    if (limitY) {
+                        SolvePlane(iteration, i, local, world, SolveAxis::Y);
+                        continue;
+                    }
+                    if (limitZ) {
+                        SolvePlane(iteration, i, local, world, SolveAxis::Z);
+                        continue;
+                    }
+                }
+            }
+        }
+    }
+
+    void SolvePlane(int iteration,
+        int chainIndex,
+        std::vector<glm::mat4>& local,
+        const std::vector<glm::mat4>& world,
+        SolveAxis axis)
+    {
+        std::wcerr << L"[SolvePlane] iteration: " << iteration
+            << L" | chainIndex: " << chainIndex
+            << L" | axis: ";
+        switch (axis) {
+        case SolveAxis::X: std::wcerr << L"X"; break;
+        case SolveAxis::Y: std::wcerr << L"Y"; break;
+        case SolveAxis::Z: std::wcerr << L"Z"; break;
+        default:           std::wcerr << L"(unknown)"; break;
+        }
+        std::wcerr << std::endl;
+
+        if (chainIndex < 0 || chainIndex >= (int)_chains.size())
+            return;
+
+        int boneIndex = _chains[chainIndex].boneIndex;
+        if (boneIndex < 0 || boneIndex >= (int)local.size())
+            return;
+
+        glm::mat4 invWorld = glm::inverse(world[boneIndex]);
+        glm::vec3 effector = glm::vec3(invWorld * world[_effectorIndex][3]);
+        glm::vec3 target = glm::vec3(invWorld * world[_targetIndex][3]);
+
+        if (axis == SolveAxis::X) {
+            effector.x = 0;
+            target.x = 0;
+        }
+        else if (axis == SolveAxis::Y) {
+            effector.y = 0;
+            target.y = 0;
+        }
+        else if (axis == SolveAxis::Z) {
+            effector.z = 0;
+            target.z = 0;
+        }
+
+        if (glm::length(effector) < 1e-5f || glm::length(target) < 1e-5f)
+            return;
+
+        effector = glm::normalize(effector);
+        target = glm::normalize(target);
+
+        float cosAngle = glm::clamp(glm::dot(effector, target), -1.0f, 1.0f);
+        float angle = std::acos(cosAngle);
+
+        float sign = glm::sign(effector.x * target.y - effector.y * target.x); // Z축 밖의 경우
+        angle *= sign;
+
+        angle = glm::clamp(angle, -_angleLimit, _angleLimit);
+
+        glm::vec3 pos, euler;
+        Decompose(local[boneIndex], pos, euler);
+
+        if (axis == SolveAxis::X) euler.x += angle;
+        if (axis == SolveAxis::Y) euler.y += angle;
+        if (axis == SolveAxis::Z) euler.z += angle;
+
+        local[boneIndex] = ComposeTransform(pos, euler);
+    }
+
+    void Decompose(const glm::mat4& mat, glm::vec3& outPos, glm::vec3& outEuler) {
+        outPos = glm::vec3(mat[3]);
+
+        glm::quat rot = glm::quat_cast(mat);
+        outEuler = glm::eulerAngles(rot);
+
+        std::wcerr << L"[Decompose] position: (" << outPos.x << L", " << outPos.y << L", " << outPos.z << L")"
+            << L" | euler: (" << outEuler.x << L", " << outEuler.y << L", " << outEuler.z << L")" << std::endl;
+    }
+    glm::mat4 ComposeTransform(const glm::vec3& pos, const glm::vec3& euler) {
+        std::wcerr << L"[Compose] position: (" << pos.x << L", " << pos.y << L", " << pos.z << L")"
+            << L" | euler: (" << euler.x << L", " << euler.y << L", " << euler.z << L")" << std::endl;
+
+        glm::mat4 T = glm::translate(glm::mat4(1.0f), pos);
+        glm::mat4 R = glm::yawPitchRoll(euler.y, euler.x, euler.z);
+
+        return T * R;
     }
 
     bool IsEnabledAtFrame(int frameNo, const std::vector<const vmd::VmdIkFrame*>& keyframes) const {
