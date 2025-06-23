@@ -285,19 +285,19 @@ public:
 
             glm::vec2 p1x(interp[0], interp[1]);
             glm::vec2 p2x(interp[8], interp[9]);
-            float tx = BezierInterpolate(t, p1x / 127.0f, p2x / 127.0f, 12);
+            float tx = GetYFromXOnBezier(t, p1x / 127.0f, p2x / 127.0f, 12);
 
             glm::vec2 p1y(interp[16], interp[17]);
             glm::vec2 p2y(interp[24], interp[25]);
-            float ty = BezierInterpolate(t, p1y / 127.0f, p2y / 127.0f, 12);
+            float ty = GetYFromXOnBezier(t, p1y / 127.0f, p2y / 127.0f, 12);
 
             glm::vec2 p1z(interp[32], interp[33]);
             glm::vec2 p2z(interp[40], interp[41]);
-            float tz = BezierInterpolate(t, p1z / 127.0f, p2z / 127.0f, 12);
+            float tz = GetYFromXOnBezier(t, p1z / 127.0f, p2z / 127.0f, 12);
 
             glm::vec2 p1r(interp[48], interp[49]);
             glm::vec2 p2r(interp[56], interp[57]);
-            float tr = BezierInterpolate(t, p1r / 127.0f, p2r / 127.0f, 12);
+            float tr = GetYFromXOnBezier(t, p1r / 127.0f, p2r / 127.0f, 12);
 
             glm::vec3 pos2(next.position[0], next.position[1], next.position[2]);
             glm::quat rot2(next.orientation[3], next.orientation[0], next.orientation[1], next.orientation[2]);
@@ -377,11 +377,11 @@ public:
 class NodeManager
 {
 public:
-    void Init(const std::vector<pmx::PmxBone>& bones) {
-        _boneNodeByIdx.resize(bones.size());
-        _sortedNodes.resize(bones.size());
+    void Init(std::unique_ptr<pmx::PmxBone[]>& bones, size_t boneCount) {
+        _boneNodeByIdx.resize(boneCount);
+        _sortedNodes.resize(boneCount);
 
-        for (int index = 0; index < bones.size(); ++index)
+        for (int index = 0; index < boneCount; ++index)
         {
             const auto& currentBoneData = bones[index];
             auto* node = new BoneNode(index, currentBoneData);
@@ -908,6 +908,9 @@ int main()
 
     vector<glm::mat4> globalMatrices(model.bone_count);
     vector<glm::mat4> localMatrices(model.bone_count);
+
+    NodeManager _nodeManager;
+    _nodeManager.Init(model.bones, model.bone_count);
 
     // 루프
     while (!glfwWindowShouldClose(window)) {
