@@ -239,7 +239,7 @@ public:
 
         glm::mat4 translate = glm::translate(glm::mat4(1.0f), t);
 
-        _localTransform = translate * rotation * scale;
+        _localTransform = scale * rotation * translate;
     }
     void UpdateGlobalTransform() {
         if (_parentBoneNode == nullptr)
@@ -248,7 +248,7 @@ public:
         }
         else
         {
-            _globalTransform = _parentBoneNode->_globalTransform * _localTransform;
+            _globalTransform = _localTransform * _parentBoneNode->_globalTransform;
         }
 
         for (BoneNode* child : _childrenNodes)
@@ -281,7 +281,7 @@ public:
 
             float t = static_cast<float>(frameNo - rit->frame) / total;
 
-            const char* interp = reinterpret_cast<const char*>(rit->interpolation);
+            const char* interp = reinterpret_cast<const char*>(next.interpolation);
 
             glm::vec2 p1x(interp[0], interp[1]);
             glm::vec2 p2x(interp[8], interp[9]);
@@ -985,8 +985,6 @@ int main()
         _nodeManager.UpdateAnimation(currentFrame);
 
         std::vector<glm::mat4> boneMatrices;
-        boneMatrices.reserve(_nodeManager._boneNodeByIdx.size());
-
         for (int i = 0; i < _nodeManager._boneNodeByIdx.size(); ++i)
         {
             BoneNode* node = _nodeManager.GetBoneNodeByIndex(i);
