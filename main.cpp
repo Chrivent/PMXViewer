@@ -231,11 +231,9 @@ public:
     }
 
     void UpdateLocalTransform() {
-        glm::mat4 Trest = glm::translate(glm::mat4(1.0f), _position);
-        glm::mat4 Tanim = glm::translate(glm::mat4(1.0f), _animatePosition);
         glm::mat4 Ranim = glm::toMat4(_animateRotation);
-
-        _localTransform = Trest * Tanim * Ranim * glm::inverse(Trest);
+        glm::mat4 T = glm::translate(glm::mat4(1.0f), _position + _animatePosition);
+        _localTransform = T * Ranim;
     }
     void UpdateGlobalTransform() {
         if (_parentBoneNode == nullptr)
@@ -984,7 +982,7 @@ int main()
         for (int i = 0; i < _nodeManager._boneNodeByIdx.size(); ++i)
         {
             BoneNode* node = _nodeManager.GetBoneNodeByIndex(i);
-            boneMatrices.emplace_back(node->_globalTransform);
+            boneMatrices.emplace_back(node->_globalTransform * node->_inverseInitTransform);
         }
 
         GLint loc = glGetUniformLocation(shader.ID, "boneMatrices");
