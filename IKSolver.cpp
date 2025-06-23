@@ -79,9 +79,6 @@ void IKSolver::SolveCore(unsigned int iteration) {
 
         if (chain.enableAxisLimit == true)
         {
-            const glm::vec3& min = chain.limitMin;
-            const glm::vec3& max = chain.limitMax;
-
             if ((chain.limitMin.x != 0 || chain.limitMax.x != 0) &&
                 (chain.limitMin.y == 0 || chain.limitMax.y == 0) &&
                 (chain.limitMin.z == 0 || chain.limitMax.z == 0))
@@ -107,7 +104,7 @@ void IKSolver::SolveCore(unsigned int iteration) {
 
         glm::vec3 targetPosition = glm::vec3(_targetNode->_globalTransform[3]);
 
-        glm::mat4 inverseChain = glm::inverse(chainNode->_globalTransform);
+        glm::mat4 inverseChain = glm::inverse(chain.boneNode->_globalTransform);
 
         glm::vec3 chainIKPosition = glm::vec3(inverseChain * glm::vec4(ikPosition, 1.0f));
         glm::vec3 chainTargetPosition = glm::vec3(inverseChain * glm::vec4(targetPosition, 1.0f));
@@ -129,7 +126,7 @@ void IKSolver::SolveCore(unsigned int iteration) {
         glm::vec3 cross = glm::normalize(glm::cross(chainTargetVector, chainIKVector));
         glm::mat4 rotation = glm::rotate(glm::mat4(1.0f), angle, cross);
 
-        glm::mat4 chainRotation = rotation * glm::toMat4(chainNode->_animateRotation) * glm::toMat4(chainNode->_ikRotation);
+        glm::mat4 chainRotation = glm::toMat4(chainNode->_ikRotation) * glm::toMat4(chainNode->_animateRotation) * rotation;
         if (chain.enableAxisLimit == true)
         {
             glm::vec3 rotXYZ = Decompose(chainRotation, chain.prevAngle);
@@ -145,7 +142,7 @@ void IKSolver::SolveCore(unsigned int iteration) {
 
         glm::mat4 inverseAnimate = glm::inverse(glm::toMat4(chain.boneNode->_animateRotation));
 
-        glm::mat4 ikRotation = inverseAnimate * chainRotation;
+        glm::mat4 ikRotation = chainRotation * inverseAnimate;
         chainNode->_ikRotation = glm::quat_cast(ikRotation);
 
         chainNode->UpdateLocalTransform();
@@ -230,7 +227,7 @@ void IKSolver::SolvePlane(unsigned int iteration, unsigned int chainIndex, Solve
 
     glm::mat4 inverseAnimate = glm::inverse(glm::toMat4(chain.boneNode->_animateRotation));
 
-    glm::mat4 ikRotation = inverseAnimate * glm::rotate(glm::mat4(1.0f), newAngle, rotateAxis);
+    glm::mat4 ikRotation = glm::rotate(glm::mat4(1.0f), newAngle, rotateAxis) * inverseAnimate;
 
     chain.boneNode->_ikRotation = glm::quat_cast(ikRotation);
 

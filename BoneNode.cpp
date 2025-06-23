@@ -59,7 +59,7 @@ void BoneNode::UpdateLocalTransform()
     glm::mat4 rotation = glm::toMat4(_animateRotation);
     if (_enableIK)
     {
-        rotation = rotation * glm::toMat4(_ikRotation);
+        rotation = glm::toMat4(_ikRotation) * rotation;
     }
 
     glm::vec3 t = _position + _animatePosition;

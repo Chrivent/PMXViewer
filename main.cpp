@@ -224,7 +224,10 @@ public:
                 {
                     const pmx::PmxIkLink& ikLink = currentPmxBone.ik_links[i];
                     int linkIndex = ikLink.link_target;
-                    if (linkIndex < 0 || linkIndex >= _boneNodeByIdx.size()) continue;
+                    if (linkIndex < 0 || linkIndex >= _boneNodeByIdx.size())
+                    {
+                        continue;
+                    }
 
                     BoneNode* linkNode = _boneNodeByIdx[linkIndex];
                     if (ikLink.angle_lock == true)
@@ -271,8 +274,8 @@ public:
                 bones[parentIndex].position[1],
                 bones[parentIndex].position[2]);
 
-            glm::vec3 relative = pos - parentPos;
-            currentBoneNode->_position = relative;
+            glm::vec3 resultPos = pos - parentPos;
+            currentBoneNode->_position = resultPos;
         }
 
         std::stable_sort(_sortedNodes.begin(), _sortedNodes.end(),
