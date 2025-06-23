@@ -182,6 +182,308 @@ void ApplyMorph(const pmx::PmxModel& model, vector<GLVertex>& vertices, vector<g
     }
 }
 
+class BoneNode
+{
+public:
+    BoneNode(unsigned int index, const pmx::PmxBone& pmxBone)
+    {
+        _boneIndex = index,
+        _name = pmxBone.bone_name,
+        _position = glm::vec3(pmxBone.position[0], pmxBone.position[1], pmxBone.position[2]),
+        _parentBoneIndex = pmxBone.parent_index,
+        _deformDepth = pmxBone.level,
+        _boneFlag = pmxBone.bone_flag,
+        _appendBoneIndex = pmxBone.grant_parent_index,
+        _ikTargetBoneIndex = pmxBone.ik_target_bone_index,
+        _ikIterationCount = pmxBone.ik_link_count,
+        _ikLimit = pmxBone.ik_loop_angle_limit,
+        _animatePosition = glm::vec3(0.0f);
+        _animateRotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+        _inverseInitTransform = glm::translate(glm::mat4(1.0f), -_position);
+        _localTransform = glm::mat4(1.0f);
+        _globalTransform = glm::mat4(1.0f);
+        _appendTranslate = glm::vec3(0.0f);
+        _appendRotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+    }
+
+    void SetParentBoneNode(BoneNode* parentNode)
+    {
+        _parentBoneNode = parentNode;
+        _parentBoneNode->_childrenNodes.push_back(this);
+    }
+
+    void SortAllKeys() {
+        std::sort(_motionKeys.begin(), _motionKeys.end(),
+            [](const vmd::VmdBoneFrame& left, const vmd::VmdBoneFrame& right)
+            {
+                return left.frame <= right.frame;
+            });
+    }
+
+    unsigned int GetMaxFrameNo() const {
+        unsigned int maxFrame = 0;
+        for (const auto& key : _motionKeys) {
+            if (key.frame > maxFrame) {
+                maxFrame = key.frame;
+            }
+        }
+        return maxFrame;
+    }
+
+    void UpdateLocalTransform() {
+        glm::mat4 scale = glm::mat4(1.0f);
+
+        glm::mat4 rotation = glm::toMat4(_animateRotation);
+
+        glm::vec3 t = _animatePosition + _position;
+
+        glm::mat4 translate = glm::translate(glm::mat4(1.0f), t);
+
+        _localTransform = translate * rotation * scale;
+    }
+    void UpdateGlobalTransform() {
+        if (_parentBoneNode == nullptr)
+        {
+            _globalTransform = _localTransform;
+        }
+        else
+        {
+            _globalTransform = _parentBoneNode->_globalTransform * _localTransform;
+        }
+
+        for (BoneNode* child : _childrenNodes)
+        {
+            child->UpdateGlobalTransform();
+        }
+    }
+
+    void AnimateMotion(unsigned int frameNo) {
+        _animateRotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+        _animatePosition = glm::vec3(0.0f);
+
+        if (_motionKeys.empty()) return;
+
+        auto rit = std::find_if(_motionKeys.rbegin(), _motionKeys.rend(),
+            [frameNo](const vmd::VmdBoneFrame& key)
+            {
+                return key.frame <= frameNo;
+            });
+
+        glm::vec3 pos1(rit->position[0], rit->position[1], rit->position[2]);
+        glm::quat rot1(rit->orientation[3], rit->orientation[0], rit->orientation[1], rit->orientation[2]);
+
+        auto it = rit.base(); // 다음 키프레임
+        if (it != _motionKeys.end()) {
+            const auto& next = *it;
+
+            float total = static_cast<float>(next.frame - rit->frame);
+            if (total <= 0.0f) return;
+
+            float t = static_cast<float>(frameNo - rit->frame) / total;
+
+            const char* interp = reinterpret_cast<const char*>(rit->interpolation);
+
+            glm::vec2 p1x(interp[0], interp[1]);
+            glm::vec2 p2x(interp[8], interp[9]);
+            float tx = BezierInterpolate(t, p1x / 127.0f, p2x / 127.0f, 12);
+
+            glm::vec2 p1y(interp[16], interp[17]);
+            glm::vec2 p2y(interp[24], interp[25]);
+            float ty = BezierInterpolate(t, p1y / 127.0f, p2y / 127.0f, 12);
+
+            glm::vec2 p1z(interp[32], interp[33]);
+            glm::vec2 p2z(interp[40], interp[41]);
+            float tz = BezierInterpolate(t, p1z / 127.0f, p2z / 127.0f, 12);
+
+            glm::vec2 p1r(interp[48], interp[49]);
+            glm::vec2 p2r(interp[56], interp[57]);
+            float tr = BezierInterpolate(t, p1r / 127.0f, p2r / 127.0f, 12);
+
+            glm::vec3 pos2(next.position[0], next.position[1], next.position[2]);
+            glm::quat rot2(next.orientation[3], next.orientation[0], next.orientation[1], next.orientation[2]);
+
+            _animatePosition = glm::vec3(
+                glm::mix(pos1.x, pos2.x, glm::clamp(tx, 0.0f, 1.0f)),
+                glm::mix(pos1.y, pos2.y, glm::clamp(ty, 0.0f, 1.0f)),
+                glm::mix(pos1.z, pos2.z, glm::clamp(tz, 0.0f, 1.0f))
+            );
+            _animateRotation = glm::slerp(rot1, rot2, glm::clamp(tr, 0.0f, 1.0f));
+        }
+        else {
+            _animatePosition = pos1;
+            _animateRotation = rot1;
+        }
+    }
+
+    float GetYFromXOnBezier(float x, const glm::vec2& a, const glm::vec2& b, int n, float epsilon = 1e-5f)
+    {
+        if (a.x == a.y && b.x == b.y)
+            return x;
+
+        float t = x;
+        float k0 = 1 + 3 * a.x - 3 * b.x;
+        float k1 = 3 * b.x - 6 * a.x;
+        float k2 = 3 * a.x;
+
+        for (int i = 0; i < n; ++i) {
+            float ft = k0 * t * t * t + k1 * t * t + k2 * t - x;
+            if (fabs(ft) < epsilon) break;
+            t -= ft / 2.0f;
+        }
+
+        float r = 1 - t;
+        return t * t * t + 3 * t * t * r * b.y + 3 * t * r * r * a.y;
+    }
+
+    unsigned int _boneIndex;
+    std::wstring _name;
+    glm::vec3 _position;
+    unsigned int _parentBoneIndex = -1;
+    unsigned int _deformDepth;
+    uint16_t _boneFlag;
+    unsigned int _appendBoneIndex;
+    unsigned int _ikTargetBoneIndex;
+    unsigned int _ikIterationCount;
+    float _ikLimit;
+    bool _enableIK = false;
+
+    glm::vec3 _animatePosition;
+    glm::quat _animateRotation;
+
+    glm::vec3 _morphPosition;
+    glm::quat _morphRotation;
+
+    glm::quat _ikRotation;
+
+    glm::vec3 _appendTranslate;
+    glm::quat _appendRotation;
+
+    glm::mat4 _inverseInitTransform;
+    glm::mat4 _localTransform;
+    glm::mat4 _globalTransform;
+
+    BoneNode* _parentBoneNode = nullptr;
+    std::vector<BoneNode*> _childrenNodes;
+
+    bool _isAppendRotate = false;
+    bool _isAppendTranslate = false;
+    bool _isAppendLocal = false;
+    float _appendWeight = 0.f;
+    BoneNode* _appendBoneNode = nullptr;
+
+    std::vector<vmd::VmdBoneFrame> _motionKeys;
+};
+
+class NodeManager
+{
+public:
+    void Init(const std::vector<pmx::PmxBone>& bones) {
+        _boneNodeByIdx.resize(bones.size());
+        _sortedNodes.resize(bones.size());
+
+        for (int index = 0; index < bones.size(); ++index)
+        {
+            const auto& currentBoneData = bones[index];
+            auto* node = new BoneNode(index, currentBoneData);
+
+            _boneNodeByIdx[index] = node;
+            _boneNodeByName[node->_name] = node;
+            _sortedNodes[index] = node;
+        }
+
+        for (int index = 0; index < _boneNodeByIdx.size(); ++index)
+        {
+            BoneNode* currentBoneNode = _boneNodeByIdx[index];
+            unsigned int parentBoneIndex = currentBoneNode->_parentBoneIndex;
+
+            if (parentBoneIndex != 65535 && parentBoneIndex < _boneNodeByIdx.size())
+            {
+                currentBoneNode->SetParentBoneNode(_boneNodeByIdx[parentBoneIndex]);
+            }
+        }
+
+        for (int index = 0; index < _boneNodeByIdx.size(); ++index)
+        {
+            BoneNode* currentBoneNode = _boneNodeByIdx[index];
+            int boneIndex = currentBoneNode->_boneIndex;
+            int parentIndex = currentBoneNode->_parentBoneIndex;
+
+            if (currentBoneNode->_parentBoneNode == nullptr) continue;
+
+            glm::vec3 pos(
+                bones[boneIndex].position[0],
+                bones[boneIndex].position[1],
+                bones[boneIndex].position[2]);
+
+            glm::vec3 parentPos(
+                bones[parentIndex].position[0],
+                bones[parentIndex].position[1],
+                bones[parentIndex].position[2]);
+
+            glm::vec3 relative = pos - parentPos;
+            currentBoneNode->_position = relative;
+        }
+
+        std::stable_sort(_sortedNodes.begin(), _sortedNodes.end(),
+            [](const BoneNode* left, const BoneNode* right)
+            {
+                return left->_deformDepth < right->_deformDepth;
+            });
+    }
+    void SortKey() {
+        for (int index = 0; index < _boneNodeByIdx.size(); index++)
+        {
+            BoneNode* currentBoneNode = _boneNodeByIdx[index];
+            currentBoneNode->SortAllKeys();
+            _duration = std::max(_duration, currentBoneNode->GetMaxFrameNo());
+        }
+    }
+
+    BoneNode* GetBoneNodeByIndex(int index) const {
+        if (index < 0 || index >= static_cast<int>(_boneNodeByIdx.size()))
+            return nullptr;
+        return _boneNodeByIdx[index];
+    }
+    BoneNode* GetBoneNodeByName(std::wstring& name) const {
+        auto it = _boneNodeByName.find(name);
+        if (it != _boneNodeByName.end())
+            return it->second;
+        return nullptr;
+    }
+
+    void UpdateAnimation(unsigned int frameNo) {
+        for (BoneNode* curNode : _boneNodeByIdx)
+        {
+            curNode->AnimateMotion(frameNo);
+            curNode->UpdateLocalTransform();
+        }
+
+        if (_boneNodeByIdx.size() > 0)
+        {
+            _boneNodeByIdx[0]->UpdateGlobalTransform();
+        }
+    }
+
+    void Dispose() {
+        for (BoneNode* node : _boneNodeByIdx)
+        {
+            delete node;
+        }
+
+        _boneNodeByIdx.clear();
+        _boneNodeByName.clear();
+        _sortedNodes.clear();
+        _duration = 0;
+    }
+
+private:
+    std::unordered_map<std::wstring, BoneNode*> _boneNodeByName;
+    std::vector<BoneNode*> _boneNodeByIdx;
+    std::vector<BoneNode*> _sortedNodes;
+
+    unsigned int _duration = 0;
+};
+
 float BezierInterpolate(float x, glm::vec2 a, glm::vec2 b, int iter = 10, float epsilon = 1e-5f) {
     if (a.x == a.y && b.x == b.y)
         return x;
@@ -204,231 +506,6 @@ float BezierInterpolate(float x, glm::vec2 a, glm::vec2 b, int iter = 10, float 
 struct BonePose {
     glm::vec3 position;
     glm::quat orientation;
-};
-
-void Decompose(const glm::mat4& mat, glm::vec3& outPos, glm::vec3& outEuler) {
-    outPos = glm::vec3(mat[3]);
-    glm::quat rot = glm::quat_cast(mat);
-    outEuler = glm::eulerAngles(rot);
-}
-
-glm::mat4 ComposeTransform(const glm::vec3& pos, const glm::vec3& euler) {
-    glm::mat4 T = glm::translate(glm::mat4(1.0f), pos);
-    glm::mat4 R = glm::yawPitchRoll(euler.y, euler.x, euler.z);
-    return T * R;
-}
-
-class IKSolver {
-private:
-    std::wstring _ikName;
-    int _effectorIndex;
-    int _targetIndex;
-    int _loopCount;
-    float _angleLimit;
-
-    struct Chain {
-        int boneIndex;
-        bool hasLimit;
-        glm::vec3 limitMin;
-        glm::vec3 limitMax;
-    };
-    std::vector<Chain> _chains;
-
-public:
-    IKSolver(const std::wstring& ikName, int effectorIdx, int targetIdx, int loopCount, float angleLimit) {
-        _ikName = ikName;
-        _effectorIndex = effectorIdx;
-        _targetIndex = targetIdx;
-        _loopCount = loopCount;
-        _angleLimit = angleLimit;
-    }
-
-    const std::wstring& GetName() const {
-        return _ikName;
-    }
-
-    void AddIKChain(int boneIndex, bool hasLimit, glm::vec3 limitMin, glm::vec3 limitMax) {
-        _chains.push_back({ boneIndex, hasLimit, limitMin, limitMax });
-    }
-
-    void Solve(std::vector<glm::mat4>& localMatrices) {
-        for (size_t i = 0; i < _chains.size(); ++i) {
-            const auto& chain = _chains[i];
-        }
-
-        if (_effectorIndex < 0 || _targetIndex < 0 || _chains.empty())
-            return;
-
-        std::vector<glm::mat4> worldMatrices(localMatrices.size());
-
-        auto UpdateWorldMatrices = [&]() {
-            for (size_t i = 0; i < localMatrices.size(); ++i) {
-                int parent = (i < _chains.size()) ? _chains[i].boneIndex : -1;
-                if (parent >= 0 && parent < (int)localMatrices.size())
-                    worldMatrices[i] = worldMatrices[parent] * localMatrices[i];
-                else
-                    worldMatrices[i] = localMatrices[i];
-            }
-            };
-
-        float lastDistance = std::numeric_limits<float>::max();
-
-        for (int iter = 0; iter < _loopCount; ++iter) {
-            UpdateWorldMatrices();
-
-            SolveCore(iter, localMatrices, worldMatrices);
-
-            glm::vec3 effectorPos = glm::vec3(worldMatrices[_effectorIndex][3]);
-            glm::vec3 targetPos = glm::vec3(worldMatrices[_targetIndex][3]);
-            float dist = glm::length(targetPos - effectorPos);
-
-            if (dist < lastDistance) {
-                lastDistance = dist;
-            }
-            else {
-                break;
-            }
-        }
-    }
-
-    enum class SolveAxis
-    {
-        X,
-        Y,
-        Z
-    };
-
-    void SolveCore(int iteration, std::vector<glm::mat4>& local, const std::vector<glm::mat4>& world) {
-        for (size_t i = 0; i < _chains.size(); ++i) {
-            const auto& chain = _chains[i];
-            int boneIndex = chain.boneIndex;
-
-            if (boneIndex < 0 || boneIndex >= (int)local.size())
-                continue;
-
-            glm::mat4 invChainWorld = glm::inverse(world[boneIndex]);
-            glm::vec3 effectorPos = glm::vec3(invChainWorld * world[_effectorIndex][3]);
-            glm::vec3 targetPos = glm::vec3(invChainWorld * world[_targetIndex][3]);
-
-            glm::vec3 axis = glm::cross(effectorPos, targetPos);
-            float dot = glm::dot(glm::normalize(effectorPos), glm::normalize(targetPos));
-            dot = glm::clamp(dot, -1.0f, 1.0f);
-            float angle = std::acos(dot);
-
-            if (glm::length(axis) < 1e-4 || angle < 1e-4f)
-                continue;
-
-            angle = glm::min(angle, _angleLimit);
-
-            glm::quat deltaRot = glm::angleAxis(angle, glm::normalize(axis));
-            glm::mat4 R = glm::toMat4(deltaRot);
-
-            local[boneIndex] = local[boneIndex] * R;
-
-            if (chain.hasLimit) {
-                bool limitX = chain.limitMin.x != chain.limitMax.x;
-                bool limitY = chain.limitMin.y != chain.limitMax.y;
-                bool limitZ = chain.limitMin.z != chain.limitMax.z;
-
-                int axisCount = (limitX ? 1 : 0) + (limitY ? 1 : 0) + (limitZ ? 1 : 0);
-
-                if (axisCount == 1) {
-                    if (limitX) {
-                        SolvePlane(iteration, i, local, world, SolveAxis::X);
-                        continue;
-                    }
-                    if (limitY) {
-                        SolvePlane(iteration, i, local, world, SolveAxis::Y);
-                        continue;
-                    }
-                    if (limitZ) {
-                        SolvePlane(iteration, i, local, world, SolveAxis::Z);
-                        continue;
-                    }
-                }
-            }
-        }
-    }
-
-    void SolvePlane(int iteration,
-        int chainIndex,
-        std::vector<glm::mat4>& local,
-        const std::vector<glm::mat4>& world,
-        SolveAxis axis)
-    {
-        if (chainIndex < 0 || chainIndex >= (int)_chains.size())
-            return;
-
-        int boneIndex = _chains[chainIndex].boneIndex;
-        if (boneIndex < 0 || boneIndex >= (int)local.size())
-            return;
-
-        glm::mat4 invWorld = glm::inverse(world[boneIndex]);
-        glm::vec3 effector = glm::vec3(invWorld * world[_effectorIndex][3]);
-        glm::vec3 target = glm::vec3(invWorld * world[_targetIndex][3]);
-
-        if (axis == SolveAxis::X) {
-            effector.x = 0;
-            target.x = 0;
-        }
-        else if (axis == SolveAxis::Y) {
-            effector.y = 0;
-            target.y = 0;
-        }
-        else if (axis == SolveAxis::Z) {
-            effector.z = 0;
-            target.z = 0;
-        }
-
-        if (glm::length(effector) < 1e-5f || glm::length(target) < 1e-5f)
-            return;
-
-        effector = glm::normalize(effector);
-        target = glm::normalize(target);
-
-        float cosAngle = glm::clamp(glm::dot(effector, target), -1.0f, 1.0f);
-        float angle = std::acos(cosAngle);
-
-        float sign = glm::sign(effector.x * target.y - effector.y * target.x); // Z축 밖의 경우
-        angle *= sign;
-
-        angle = glm::clamp(angle, -_angleLimit, _angleLimit);
-
-        glm::vec3 pos, euler;
-        Decompose(local[boneIndex], pos, euler);
-
-        if (axis == SolveAxis::X) euler.x += angle;
-        if (axis == SolveAxis::Y) euler.y += angle;
-        if (axis == SolveAxis::Z) euler.z += angle;
-
-        local[boneIndex] = ComposeTransform(pos, euler);
-    }
-
-    bool IsEnabledAtFrame(int frameNo, const std::vector<const vmd::VmdIkFrame*>& keyframes) const {
-        const vmd::VmdIkFrame* lastFrame = nullptr;
-        for (const auto* f : keyframes) {
-            if (f->frame > frameNo) break;
-            for (const auto& ik : f->ik_enable) {
-                std::wstring name;
-                oguna::EncodingConverter{}.Cp932ToUtf16(ik.ik_name.c_str(), (int)ik.ik_name.length(), &name);
-                if (name == _ikName) {
-                    lastFrame = f;
-                    break;
-                }
-            }
-        }
-
-        if (!lastFrame) return true;
-
-        for (const auto& ik : lastFrame->ik_enable) {
-            std::wstring name;
-            oguna::EncodingConverter{}.Cp932ToUtf16(ik.ik_name.c_str(), (int)ik.ik_name.length(), &name);
-            if (name == _ikName)
-                return ik.enable;
-        }
-
-        return true;
-    }
 };
 
 class Shader {
@@ -832,38 +909,6 @@ int main()
     vector<glm::mat4> globalMatrices(model.bone_count);
     vector<glm::mat4> localMatrices(model.bone_count);
 
-    unordered_map<wstring, int> morphNameToIndex;
-    for (int i = 0; i < model.morph_count; ++i)
-        morphNameToIndex[model.morphs[i].morph_name] = i;
-
-    std::vector<std::unique_ptr<IKSolver>> ikSolvers;
-    for (int i = 0; i < model.bone_count; ++i) {
-        const auto& bone = model.bones[i];
-
-        if ((bone.bone_flag & 0x0020) != 0) {
-            auto solver = std::make_unique<IKSolver>(
-                bone.bone_name,
-                i,
-                bone.ik_target_bone_index,
-                bone.ik_loop,
-                bone.ik_loop_angle_limit
-            );
-
-            for (int j = 0; j < bone.ik_link_count; ++j) {
-                const auto& link = bone.ik_links[j];
-
-                solver->AddIKChain(
-                    link.link_target,
-                    link.angle_lock != 0,  // uint8_t → bool
-                    glm::make_vec3(link.min_radian),
-                    glm::make_vec3(link.max_radian)
-                );
-            }
-
-            ikSolvers.push_back(std::move(solver));
-        }
-    }
-
     // 루프
     while (!glfwWindowShouldClose(window)) {
         // 배경색 지정 및 지우기
@@ -997,62 +1042,6 @@ int main()
             }
             else {
                 localMatrices[i] = glm::mat4(1.0f);
-            }
-        }
-
-        for (int i = 0; i < model.bone_count; ++i) {
-            const auto& bone = model.bones[i];
-
-            if ((bone.bone_flag & 0x0100) && (bone.bone_flag & (0x0200 | 0x0400))) {
-                int parentIdx = bone.grant_parent_index;
-                float weight = bone.grant_weight;
-
-                glm::vec3 pos, euler;
-                Decompose(localMatrices[i], pos, euler);
-
-                if (bone.bone_flag & 0x0200) {
-                    glm::quat parentRot = glm::quat_cast(localMatrices[parentIdx]);
-                    glm::quat selfRot = glm::quat_cast(localMatrices[i]);
-                    glm::quat mixed = glm::slerp(selfRot, parentRot * selfRot, weight);
-                    glm::mat4 rot = glm::toMat4(mixed);
-
-                    localMatrices[i] = glm::translate(glm::mat4(1.0f), pos) * rot;
-                }
-
-                if (bone.bone_flag & 0x0400) {
-                    glm::vec3 appendPos = glm::vec3(localMatrices[parentIdx][3]);
-                    pos += appendPos * weight;
-
-                    glm::quat rot = glm::quat_cast(localMatrices[i]);
-                    localMatrices[i] = glm::translate(glm::mat4(1.0f), pos) * glm::toMat4(rot);
-                }
-            }
-        }
-
-        for (auto& solver : ikSolvers) {
-            const auto& keyframes = ikKeyframes[solver->GetName()];
-            if (solver->IsEnabledAtFrame(currentFrame, keyframes)) {
-                solver->Solve(localMatrices);
-            }
-        }
-
-        // 모프 프레임 적용
-        morphWeights.clear();
-        for (const auto& [name, frames] : faceKeyframes) {
-            if (frames.empty()) continue;
-            int idx = -1;
-            for (int i = 0; i < frames.size(); ++i) {
-                if (frames[i]->frame > currentFrame) break;
-                idx = i;
-            }
-            if (idx >= 0) {
-                morphWeights[name] = frames[idx]->weight;
-            }
-        }
-        for (const auto& [name, weight] : morphWeights) {
-            auto it = morphNameToIndex.find(name);
-            if (it != morphNameToIndex.end()) {
-                ApplyMorph(model, gVertices, localMatrices, it->second, weight);
             }
         }
 
