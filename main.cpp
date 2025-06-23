@@ -7,9 +7,6 @@
 #include <fcntl.h>
 #include <io.h>
 
-#include "Pmx.h"
-#include "Vmd.h"
-
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -23,6 +20,11 @@
 
 #define STB_IMAGE_RESIZE_IMPLEMENTATION
 #include "stb_image_resize2.h"
+
+#include "Pmx.h"
+#include "Vmd.h"
+#include "BoneNode.h"
+#include "IKSolver.h"
 
 using namespace std;
 
@@ -182,199 +184,6 @@ void ApplyMorph(const pmx::PmxModel& model, vector<GLVertex>& vertices, vector<g
     }
 }
 
-class BoneNode
-{
-public:
-    BoneNode(unsigned int index, const pmx::PmxBone& pmxBone)
-    {
-        _boneIndex = index,
-        _name = pmxBone.bone_name,
-        _position = glm::vec3(pmxBone.position[0], pmxBone.position[1], pmxBone.position[2]),
-        _parentBoneIndex = pmxBone.parent_index,
-        _deformDepth = pmxBone.level,
-        _boneFlag = pmxBone.bone_flag,
-        _appendBoneIndex = pmxBone.grant_parent_index,
-        _ikTargetBoneIndex = pmxBone.ik_target_bone_index,
-        _ikIterationCount = pmxBone.ik_link_count,
-        _ikLimit = pmxBone.ik_loop_angle_limit,
-        _animatePosition = glm::vec3(0.0f);
-        _animateRotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
-        _inverseInitTransform = glm::translate(glm::mat4(1.0f), -_position);
-        _localTransform = glm::mat4(1.0f);
-        _globalTransform = glm::mat4(1.0f);
-        _appendTranslate = glm::vec3(0.0f);
-        _appendRotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
-    }
-
-    void SetParentBoneNode(BoneNode* parentNode)
-    {
-        _parentBoneNode = parentNode;
-        _parentBoneNode->_childrenNodes.push_back(this);
-    }
-
-    void SortAllKeys() {
-        std::sort(_motionKeys.begin(), _motionKeys.end(),
-            [](const vmd::VmdBoneFrame& left, const vmd::VmdBoneFrame& right)
-            {
-                return left.frame <= right.frame;
-            });
-    }
-
-    unsigned int GetMaxFrameNo() const {
-        unsigned int maxFrame = 0;
-        for (const auto& key : _motionKeys) {
-            if (key.frame > maxFrame) {
-                maxFrame = key.frame;
-            }
-        }
-        return maxFrame;
-    }
-
-    void UpdateLocalTransform() {
-        glm::mat4 scale = glm::mat4(1.0f);
-
-        glm::mat4 rotation = glm::toMat4(_animateRotation);
-
-        glm::vec3 t = _animatePosition + _position;
-
-        glm::mat4 translate = glm::translate(glm::mat4(1.0f), t);
-
-        _localTransform = translate * rotation * scale;
-    }
-
-    void UpdateGlobalTransform() {
-        if (_parentBoneNode == nullptr)
-        {
-            _globalTransform = _localTransform;
-        }
-        else
-        {
-            _globalTransform = _parentBoneNode->_globalTransform * _localTransform;
-        }
-
-        for (BoneNode* child : _childrenNodes)
-        {
-            child->UpdateGlobalTransform();
-        }
-    }
-
-    void AnimateMotion(float frameNo) {
-        _animateRotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
-        _animatePosition = glm::vec3(0.0f);
-
-        if (_motionKeys.empty()) return;
-
-        auto rit = std::find_if(_motionKeys.rbegin(), _motionKeys.rend(),
-            [frameNo](const vmd::VmdBoneFrame& key)
-            {
-                return key.frame <= frameNo;
-            });
-
-        glm::vec3 pos1(rit->position[0], rit->position[1], rit->position[2]);
-        glm::quat rot1(rit->orientation[3], rit->orientation[0], rit->orientation[1], rit->orientation[2]);
-
-        auto it = rit.base(); // 다음 키프레임
-        if (it != _motionKeys.end()) {
-            const auto& next = *it;
-
-            float total = static_cast<float>(next.frame - rit->frame);
-            if (total <= 0.0f) return;
-
-            float t = static_cast<float>(frameNo - rit->frame) / total;
-
-            const char* interp = reinterpret_cast<const char*>(next.interpolation);
-
-            glm::vec2 p1x(interp[0], interp[1]);
-            glm::vec2 p2x(interp[8], interp[9]);
-            float tx = GetYFromXOnBezier(t, p1x / 127.0f, p2x / 127.0f, 12);
-
-            glm::vec2 p1y(interp[16], interp[17]);
-            glm::vec2 p2y(interp[24], interp[25]);
-            float ty = GetYFromXOnBezier(t, p1y / 127.0f, p2y / 127.0f, 12);
-
-            glm::vec2 p1z(interp[32], interp[33]);
-            glm::vec2 p2z(interp[40], interp[41]);
-            float tz = GetYFromXOnBezier(t, p1z / 127.0f, p2z / 127.0f, 12);
-
-            glm::vec2 p1r(interp[48], interp[49]);
-            glm::vec2 p2r(interp[56], interp[57]);
-            float tr = GetYFromXOnBezier(t, p1r / 127.0f, p2r / 127.0f, 12);
-
-            glm::vec3 pos2(next.position[0], next.position[1], next.position[2]);
-            glm::quat rot2(next.orientation[3], next.orientation[0], next.orientation[1], next.orientation[2]);
-
-            _animatePosition = glm::vec3(
-                glm::mix(pos1.x, pos2.x, glm::clamp(tx, 0.0f, 1.0f)),
-                glm::mix(pos1.y, pos2.y, glm::clamp(ty, 0.0f, 1.0f)),
-                glm::mix(pos1.z, pos2.z, glm::clamp(tz, 0.0f, 1.0f))
-            );
-            _animateRotation = glm::slerp(rot1, rot2, glm::clamp(tr, 0.0f, 1.0f));
-        }
-        else {
-            _animatePosition = pos1;
-            _animateRotation = rot1;
-        }
-    }
-
-    float GetYFromXOnBezier(float x, const glm::vec2& a, const glm::vec2& b, int n, float epsilon = 1e-5f)
-    {
-        if (a.x == a.y && b.x == b.y)
-            return x;
-
-        float t = x;
-        float k0 = 1 + 3 * a.x - 3 * b.x;
-        float k1 = 3 * b.x - 6 * a.x;
-        float k2 = 3 * a.x;
-
-        for (int i = 0; i < n; ++i) {
-            float ft = k0 * t * t * t + k1 * t * t + k2 * t - x;
-            if (fabs(ft) < epsilon) break;
-            t -= ft / 2.0f;
-        }
-
-        float r = 1 - t;
-        return t * t * t + 3 * t * t * r * b.y + 3 * t * r * r * a.y;
-    }
-
-    unsigned int _boneIndex;
-    std::wstring _name;
-    glm::vec3 _position;
-    unsigned int _parentBoneIndex = -1;
-    unsigned int _deformDepth;
-    uint16_t _boneFlag;
-    unsigned int _appendBoneIndex;
-    unsigned int _ikTargetBoneIndex;
-    unsigned int _ikIterationCount;
-    float _ikLimit;
-    bool _enableIK = false;
-
-    glm::vec3 _animatePosition;
-    glm::quat _animateRotation;
-
-    glm::vec3 _morphPosition;
-    glm::quat _morphRotation;
-
-    glm::quat _ikRotation;
-
-    glm::vec3 _appendTranslate;
-    glm::quat _appendRotation;
-
-    glm::mat4 _inverseInitTransform;
-    glm::mat4 _localTransform;
-    glm::mat4 _globalTransform;
-
-    BoneNode* _parentBoneNode = nullptr;
-    std::vector<BoneNode*> _childrenNodes;
-
-    bool _isAppendRotate = false;
-    bool _isAppendTranslate = false;
-    bool _isAppendLocal = false;
-    float _appendWeight = 0.f;
-    BoneNode* _appendBoneNode = nullptr;
-
-    std::vector<vmd::VmdBoneFrame> _motionKeys;
-};
-
 class NodeManager
 {
 public:
@@ -385,21 +194,62 @@ public:
         for (int index = 0; index < boneCount; ++index)
         {
             const auto& currentBoneData = bones[index];
-            auto* node = new BoneNode(index, currentBoneData);
-
-            _boneNodeByIdx[index] = node;
-            _boneNodeByName[node->_name] = node;
-            _sortedNodes[index] = node;
+            _boneNodeByIdx[index] = new BoneNode(index, currentBoneData);
+            _boneNodeByName[_boneNodeByIdx[index]->_name] = _boneNodeByIdx[index];
+            _sortedNodes[index] = _boneNodeByIdx[index];
         }
 
         for (int index = 0; index < _boneNodeByIdx.size(); ++index)
         {
             BoneNode* currentBoneNode = _boneNodeByIdx[index];
-            unsigned int parentBoneIndex = currentBoneNode->_parentBoneIndex;
 
-            if (parentBoneIndex != 65535 && parentBoneIndex < _boneNodeByIdx.size())
+            unsigned int parentBoneIndex = currentBoneNode->_parentBoneIndex;
+            if (parentBoneIndex != 65535 && _boneNodeByIdx.size() > parentBoneIndex)
             {
                 currentBoneNode->SetParentBoneNode(_boneNodeByIdx[parentBoneIndex]);
+            }
+
+            const pmx::PmxBone& currentPmxBone = bones[index];
+
+            if ((currentPmxBone.bone_flag & 0x0020) && currentPmxBone.ik_target_bone_index < _boneNodeByIdx.size())
+            {
+                BoneNode* targetNode = _boneNodeByIdx[currentPmxBone.ik_target_bone_index];
+                unsigned int iterationCount = currentPmxBone.ik_loop;
+                float limitAngle = currentPmxBone.ik_loop_angle_limit;
+
+                IKSolver* solver = new IKSolver(currentBoneNode, targetNode, iterationCount, limitAngle);
+                _ikSolvers.push_back(solver);
+
+                for (int i = 0; i < currentPmxBone.ik_link_count; ++i)
+                {
+                    const pmx::PmxIkLink& ikLink = currentPmxBone.ik_links[i];
+                    int linkIndex = ikLink.link_target;
+                    if (linkIndex < 0 || linkIndex >= _boneNodeByIdx.size()) continue;
+
+                    BoneNode* linkNode = _boneNodeByIdx[linkIndex];
+                    if (ikLink.angle_lock == true)
+                    {
+                        glm::vec3 limitMin(
+                            ikLink.min_radian[0],
+                            ikLink.min_radian[1],
+                            ikLink.min_radian[2]
+                        );
+                        glm::vec3 limitMax(
+                            ikLink.max_radian[0],
+                            ikLink.max_radian[1],
+                            ikLink.max_radian[2]
+                        );
+                        solver->AddIKChain(linkNode, true, limitMin, limitMax);
+                    }
+                    else
+                    {
+                        solver->AddIKChain(linkNode, false,
+                            glm::vec3(glm::radians(0.5f), 0.0f, 0.0f),
+                            glm::vec3(glm::radians(180.0f), 0.0f, 0.0f));
+                    }
+                    linkNode->_enableIK = true;
+                }
+                currentBoneNode->_ikSolver = solver;
             }
         }
 
@@ -436,7 +286,7 @@ public:
         {
             BoneNode* currentBoneNode = _boneNodeByIdx[index];
             currentBoneNode->SortAllKeys();
-            _duration = std::max(_duration, currentBoneNode->GetMaxFrameNo());
+            _duration = (std::max)(_duration, currentBoneNode->GetMaxFrameNo());
         }
     }
 
@@ -456,12 +306,23 @@ public:
         for (BoneNode* curNode : _boneNodeByIdx)
         {
             curNode->AnimateMotion(frameNo);
+            curNode->AnimateIK(frameNo);
             curNode->UpdateLocalTransform();
         }
 
         if (_boneNodeByIdx.size() > 0)
         {
             _boneNodeByIdx[0]->UpdateGlobalTransform();
+        }
+
+        for (BoneNode* curNode : _sortedNodes)
+        {
+            IKSolver* curSolver = curNode->_ikSolver;
+            if (curSolver != nullptr)
+            {
+                curSolver->Solve();
+                curNode->UpdateGlobalTransform();
+            }
         }
     }
 
@@ -482,381 +343,8 @@ public:
     std::vector<BoneNode*> _sortedNodes;
 
     unsigned int _duration = 0;
-};
 
-struct IKChain
-{
-    BoneNode* boneNode;
-    bool enableAxisLimit;
-    glm::vec3 limitMin;
-    glm::vec3 limitMax;
-    glm::vec3 prevAngle;
-    glm::quat saveIKRotation;
-    float planeModeAngle;
-
-    IKChain(BoneNode* linkNode, bool axisLimit, const glm::vec3& limitMinimum, const glm::vec3& limitMaximum)
-    {
-        boneNode = linkNode;
-        enableAxisLimit = axisLimit;
-        limitMin = limitMinimum;
-        limitMax = limitMaximum;
-        saveIKRotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
-    }
-};
-
-enum class SolveAxis
-{
-    X, Y, Z
-};
-
-class IKSolver
-{
-public:
-    IKSolver(BoneNode* node, BoneNode* targetNode, unsigned int iterationCount, float limitAngle)
-        : _ikNode(node),
-        _targetNode(targetNode),
-        _ikIterationCount(iterationCount),
-        _ikLimitAngle(limitAngle),
-        _enable(true)
-    {
-    }
-
-    void Solve() {
-        if (_enable == false)
-        {
-            return;
-        }
-
-        if (_ikNode == nullptr || _targetNode == nullptr)
-        {
-            return;
-        }
-
-        for (IKChain& chain : _ikChains)
-        {
-            chain.prevAngle = glm::vec3(0.0f);
-            chain.boneNode->_ikRotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
-            chain.planeModeAngle = 0.f;
-
-            chain.boneNode->UpdateLocalTransform();
-            chain.boneNode->UpdateGlobalTransform();
-        }
-
-        float maxDistance = std::numeric_limits<float>::max();
-        for (unsigned int i = 0; i < _ikIterationCount; ++i)
-        {
-            SolveCore(i);
-
-            glm::vec3 targetPos = glm::vec3(_targetNode->_globalTransform[3]);
-            glm::vec3 ikPosition = glm::vec3(_ikNode->_globalTransform[3]);
-            float dist = glm::length(targetPos - ikPosition);
-
-            if (dist < maxDistance)
-            {
-                maxDistance = dist;
-                for (IKChain& chain : _ikChains)
-                {
-                    chain.saveIKRotation = chain.boneNode->_ikRotation;
-                }
-            }
-            else
-            {
-                for (IKChain& chain : _ikChains)
-                {
-                    chain.boneNode->_ikRotation = chain.saveIKRotation;
-                    chain.boneNode->UpdateLocalTransform();
-                    chain.boneNode->UpdateGlobalTransform();
-                }
-                break;
-            }
-        }
-    }
-
-    void AddIKChain(BoneNode* linkNode, bool axisLimit, const glm::vec3& limitMin, const glm::vec3& limitMax)
-    {
-        _ikChains.emplace_back(linkNode, axisLimit, limitMin, limitMax);
-    }
-
-private:
-    void SolveCore(unsigned int iteration) {
-        glm::vec3 ikPosition = glm::vec3(_ikNode->_globalTransform[3]);
-        for (unsigned int chainIndex = 0; chainIndex < _ikChains.size(); chainIndex++)
-        {
-            IKChain& chain = _ikChains[chainIndex];
-            BoneNode* chainNode = chain.boneNode;
-            if (chainNode == nullptr)
-            {
-                continue;
-            }
-
-            if (chain.enableAxisLimit == true)
-            {
-                const glm::vec3& min = chain.limitMin;
-                const glm::vec3& max = chain.limitMax;
-
-                if ((chain.limitMin.x != 0 || chain.limitMax.x != 0) &&
-                    (chain.limitMin.y == 0 || chain.limitMax.y == 0) &&
-                    (chain.limitMin.z == 0 || chain.limitMax.z == 0))
-                {
-                    SolvePlane(iteration, chainIndex, SolveAxis::X);
-                    continue;
-                }
-                else if ((chain.limitMin.y != 0 || chain.limitMax.y != 0) &&
-                    (chain.limitMin.x == 0 || chain.limitMax.x == 0) &&
-                    (chain.limitMin.z == 0 || chain.limitMax.z == 0))
-                {
-                    SolvePlane(iteration, chainIndex, SolveAxis::Y);
-                    continue;
-                }
-                else if ((chain.limitMin.z != 0 || chain.limitMax.z != 0) &&
-                    (chain.limitMin.x == 0 || chain.limitMax.x == 0) &&
-                    (chain.limitMin.y == 0 || chain.limitMax.y == 0))
-                {
-                    SolvePlane(iteration, chainIndex, SolveAxis::Z);
-                    continue;
-                }
-            }
-
-            glm::vec3 targetPosition = glm::vec3(_targetNode->_globalTransform[3]);
-
-            glm::mat4 inverseChain = glm::inverse(chainNode->_globalTransform);
-
-            glm::vec3 chainIKPosition = glm::vec3(inverseChain * glm::vec4(ikPosition, 1.0f));
-            glm::vec3 chainTargetPosition = glm::vec3(inverseChain * glm::vec4(targetPosition, 1.0f));
-
-            glm::vec3 chainIKVector = glm::normalize(chainIKPosition);
-            glm::vec3 chainTargetVector = glm::normalize(chainTargetPosition);
-
-            float dot = glm::dot(chainTargetVector, chainIKVector);
-            dot = glm::clamp(dot, -1.f, 1.f);
-
-            float angle = acos(dot);
-            float angleDegree = glm::degrees(angle);
-            if (angleDegree < 1.0e-3f)
-            {
-                continue;
-            }
-
-            angle = glm::clamp(angle, -_ikLimitAngle, _ikLimitAngle);
-            glm::vec3 cross = glm::normalize(glm::cross(chainTargetVector, chainIKVector));
-            glm::mat4 rotation = glm::rotate(glm::mat4(1.0f), angle, cross);
-
-            glm::mat4 chainRotation = rotation * glm::toMat4(chainNode->_animateRotation) * glm::toMat4(chainNode->_ikRotation);
-            if (chain.enableAxisLimit == true)
-            {
-                glm::vec3 rotXYZ = Decompose(chainRotation, chain.prevAngle);
-
-                glm::vec3 clampXYZ = glm::clamp(rotXYZ, chain.limitMin, chain.limitMax);
-                float invLimitAngle = -_ikLimitAngle;
-                clampXYZ = glm::clamp(clampXYZ - chain.prevAngle, glm::vec3(invLimitAngle), glm::vec3(_ikLimitAngle));
-                clampXYZ += chain.prevAngle;
-
-                chainRotation = glm::eulerAngleXYZ(clampXYZ.x, clampXYZ.y, clampXYZ.z);
-                chain.prevAngle = clampXYZ;
-            }
-
-            glm::mat4 inverseAnimate = glm::inverse(glm::toMat4(chain.boneNode->_animateRotation));
-
-            glm::mat4 ikRotation = inverseAnimate * chainRotation;
-            chainNode->_ikRotation = glm::quat_cast(ikRotation);
-
-            chainNode->UpdateLocalTransform();
-            chainNode->UpdateGlobalTransform();
-        }
-    }
-    void SolvePlane(unsigned int iteration, unsigned int chainIndex, SolveAxis solveAxis) {
-        glm::vec3 rotateAxis;
-        float limitMinAngle;
-        float limitMaxAngle;
-
-        IKChain& chain = _ikChains[chainIndex];
-
-        switch (solveAxis) {
-        case SolveAxis::X:
-            limitMinAngle = chain.limitMin.x;
-            limitMaxAngle = chain.limitMax.x;
-            rotateAxis = glm::vec3(1.f, 0.f, 0.f);
-            break;
-        case SolveAxis::Y:
-            limitMinAngle = chain.limitMin.y;
-            limitMaxAngle = chain.limitMax.y;
-            rotateAxis = glm::vec3(0.f, 1.f, 0.f);
-            break;
-        case SolveAxis::Z:
-            limitMinAngle = chain.limitMin.z;
-            limitMaxAngle = chain.limitMax.z;
-            rotateAxis = glm::vec3(0.f, 0.f, 1.f);
-            break;
-        }
-
-        glm::vec3 ikPosition = glm::vec3(_ikNode->_globalTransform[3]);
-        glm::vec3 targetPosition = glm::vec3(_targetNode->_globalTransform[3]);
-
-        glm::mat4 inverseChain = glm::inverse(chain.boneNode->_globalTransform);
-
-        glm::vec3 chainIKPosition = glm::vec3(inverseChain * glm::vec4(ikPosition, 1.0f));
-        glm::vec3 chainTargetPosition = glm::vec3(inverseChain * glm::vec4(targetPosition, 1.0f));
-
-        glm::vec3 chainIKVector = glm::normalize(chainIKPosition);
-        glm::vec3 chainTargetVector = glm::normalize(chainTargetPosition);
-
-        float dot = glm::dot(chainTargetVector, chainIKVector);
-        dot = glm::clamp(dot, -1.f, 1.f);
-
-        float angle = std::acos(dot);
-        angle = glm::clamp(angle, -_ikLimitAngle, _ikLimitAngle);
-
-        glm::quat rotation1 = glm::angleAxis(angle, rotateAxis);
-        glm::vec3 targetVector1 = glm::rotate(rotation1, chainTargetVector);
-        float dot1 = glm::dot(targetVector1, chainIKVector);
-
-        glm::quat rotation2 = glm::angleAxis(-angle, rotateAxis);
-        glm::vec3 targetVector2 = glm::rotate(rotation2, chainTargetVector);
-        float dot2 = glm::dot(targetVector2, chainIKVector);
-
-        float newAngle = chain.planeModeAngle;
-        if (dot1 > dot2) {
-            newAngle += angle;
-        }
-        else {
-            newAngle -= angle;
-        }
-
-        if (iteration == 0) {
-            if (newAngle < limitMinAngle || newAngle > limitMaxAngle) {
-                if (-newAngle > limitMinAngle && -newAngle < limitMaxAngle) {
-                    newAngle *= -1;
-                }
-                else {
-                    float halfRadian = (limitMinAngle + limitMaxAngle) * 0.5f;
-                    if (std::abs(halfRadian - newAngle) > std::abs(halfRadian + newAngle)) {
-                        newAngle *= -1;
-                    }
-                }
-            }
-        }
-
-        newAngle = glm::clamp(newAngle, limitMinAngle, limitMaxAngle);
-        chain.planeModeAngle = newAngle;
-
-        glm::mat4 inverseAnimate = glm::inverse(glm::toMat4(chain.boneNode->_animateRotation));
-
-        glm::mat4 ikRotation = inverseAnimate * glm::rotate(glm::mat4(1.0f), newAngle, rotateAxis);
-
-        chain.boneNode->_ikRotation = glm::quat_cast(ikRotation);
-
-        chain.boneNode->UpdateLocalTransform();
-        chain.boneNode->UpdateGlobalTransform();
-    }
-    glm::vec3 Decompose(const glm::mat4& m, const glm::vec3& before) {
-        glm::vec3 r;
-        float sy = -m[0][2];
-        const float e = 1.0e-6f;
-
-        if ((1.0f - std::abs(sy)) < e)
-        {
-            r.y = std::asin(sy);
-            float sx = std::sin(before.x);
-            float sz = std::sin(before.z);
-            if (std::abs(sx) < std::abs(sz))
-            {
-                float cx = std::cos(before.x);
-                if (cx > 0)
-                {
-                    r.x = 0;
-                    r.z = std::asin(-m[1][0]);
-                }
-                else
-                {
-                    r.x = glm::pi<float>();
-                    r.z = std::asin(m[1][0]);
-                }
-            }
-            else
-            {
-                float cz = std::cos(before.z);
-                if (cz > 0)
-                {
-                    r.z = 0;
-                    r.x = std::asin(-m[2][1]);
-                }
-                else
-                {
-                    r.z = glm::pi<float>();
-                    r.x = std::asin(m[2][1]);
-                }
-            }
-        }
-        else
-        {
-            r.x = std::atan2(m[1][2], m[2][2]);
-            r.y = std::asin(-m[0][2]);
-            r.z = std::atan2(m[0][1], m[0][0]);
-        }
-
-        const float pi = glm::pi<float>();
-        std::vector<glm::vec3> tests = {
-            { r.x + pi, pi - r.y, r.z + pi },
-            { r.x + pi, pi - r.y, r.z - pi },
-            { r.x + pi, -pi - r.y, r.z + pi },
-            { r.x + pi, -pi - r.y, r.z - pi },
-            { r.x - pi, pi - r.y, r.z + pi },
-            { r.x - pi, pi - r.y, r.z - pi },
-            { r.x - pi, -pi - r.y, r.z + pi },
-            { r.x - pi, -pi - r.y, r.z - pi },
-        };
-
-        float errX = std::abs(DiffAngle(r.x, before.x));
-        float errY = std::abs(DiffAngle(r.y, before.y));
-        float errZ = std::abs(DiffAngle(r.z, before.z));
-        float minErr = errX + errY + errZ;
-        for (const auto& test : tests)
-        {
-            float err = std::abs(DiffAngle(test.x, before.x))
-                + std::abs(DiffAngle(test.y, before.y))
-                + std::abs(DiffAngle(test.z, before.z));
-            if (err < minErr)
-            {
-                minErr = err;
-                r = test;
-            }
-        }
-        return r;
-    }
-    float NormalizeAngle(float angle)
-    {
-        float ret = angle;
-        while (ret >= glm::two_pi<float>()) {
-            ret -= glm::two_pi<float>();
-        }
-        while (ret < 0.0f) {
-            ret += glm::two_pi<float>();
-        }
-        return ret;
-    }
-
-    float DiffAngle(float a, float b)
-    {
-        float diff = NormalizeAngle(a) - NormalizeAngle(b);
-        if (diff > glm::pi<float>()) {
-            return diff - glm::two_pi<float>();
-        }
-        else if (diff < -glm::pi<float>()) {
-            return diff + glm::two_pi<float>();
-        }
-        return diff;
-    }
-
-public:
-    bool _enable;
-
-    BoneNode* _ikNode;
-    BoneNode* _targetNode;
-
-    std::vector<IKChain> _ikChains;
-
-    unsigned int _ikIterationCount;
-    float _ikLimitAngle;
+    std::vector<IKSolver*> _ikSolvers;
 };
 
 class Shader {
