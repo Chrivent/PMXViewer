@@ -476,7 +476,6 @@ public:
         _duration = 0;
     }
 
-private:
     std::unordered_map<std::wstring, BoneNode*> _boneNodeByName;
     std::vector<BoneNode*> _boneNodeByIdx;
     std::vector<BoneNode*> _sortedNodes;
@@ -912,6 +911,21 @@ int main()
     NodeManager _nodeManager;
     _nodeManager.Init(model.bones, model.bone_count);
 
+    for (auto& boneFrame : motion->bone_frames)
+    {
+        std::wstring name;
+        oguna::EncodingConverter{}.Cp932ToUtf16(boneFrame.name.c_str(), boneFrame.name.size(), &name);
+        auto boneNode = _nodeManager.GetBoneNodeByName(name);
+        if (boneNode == nullptr)
+        {
+            continue;
+        }
+
+        boneNode->_motionKeys.emplace_back(boneFrame);
+    }
+
+    _nodeManager.SortKey();
+
     // 루프
     while (!glfwWindowShouldClose(window)) {
         // 배경색 지정 및 지우기
@@ -1056,8 +1070,22 @@ int main()
                 globalMatrices[i] = localMatrices[i];
         }
 
+        _nodeManager.UpdateAnimation(currentFrame);
+
+        std::vector<glm::mat4> boneMatrices;
+        boneMatrices.reserve(_nodeManager._boneNodeByIdx.size());
+
+        for (int i = 0; i < _nodeManager._boneNodeByIdx.size(); ++i)
+        {
+            BoneNode* node = _nodeManager.GetBoneNodeByIndex(i);
+            boneMatrices.emplace_back(node->_globalTransform);
+        }
+
         GLint loc = glGetUniformLocation(shader.ID, "boneMatrices");
-        glUniformMatrix4fv(loc, 512, GL_FALSE, glm::value_ptr(globalMatrices[0]));
+        glUniformMatrix4fv(loc, static_cast<GLsizei>(boneMatrices.size()), GL_FALSE, glm::value_ptr(boneMatrices[0]));
+
+        /*GLint loc = glGetUniformLocation(shader.ID, "boneMatrices");
+        glUniformMatrix4fv(loc, static_cast<GLsizei>(globalMatrices.size()), GL_FALSE, glm::value_ptr(globalMatrices[0]));*/
 
         glBindBuffer(GL_ARRAY_BUFFER, vbo);
         glBufferData(GL_ARRAY_BUFFER, gVertices.size() * sizeof(GLVertex), gVertices.data(), GL_STATIC_DRAW);
