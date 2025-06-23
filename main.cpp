@@ -231,15 +231,11 @@ public:
     }
 
     void UpdateLocalTransform() {
-        glm::mat4 scale = glm::mat4(1.0f);
+        glm::mat4 Trest = glm::translate(glm::mat4(1.0f), _position);
+        glm::mat4 Tanim = glm::translate(glm::mat4(1.0f), _animatePosition);
+        glm::mat4 Ranim = glm::toMat4(_animateRotation);
 
-        glm::mat4 rotation = glm::toMat4(_animateRotation);
-
-        glm::vec3 t = _animatePosition + _position;
-
-        glm::mat4 translate = glm::translate(glm::mat4(1.0f), t);
-
-        _localTransform = scale * rotation * translate;
+        _localTransform = Trest * Tanim * Ranim * glm::inverse(Trest);
     }
     void UpdateGlobalTransform() {
         if (_parentBoneNode == nullptr)
@@ -248,7 +244,7 @@ public:
         }
         else
         {
-            _globalTransform = _localTransform * _parentBoneNode->_globalTransform;
+            _globalTransform = _parentBoneNode->_globalTransform * _localTransform;
         }
 
         for (BoneNode* child : _childrenNodes)
