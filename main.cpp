@@ -720,28 +720,6 @@ int main()
     );
     vector<GLVertex> originalVertices = gVertices;
 
-    unordered_map<wstring, vector<const vmd::VmdBoneFrame*>> boneKeyframes;
-    unordered_map<wstring, vector<const vmd::VmdFaceFrame*>> faceKeyframes;
-    unordered_map<wstring, vector<const vmd::VmdIkFrame*>> ikKeyframes;
-
-    for (const auto& f : motion->bone_frames) {
-        wstring name;
-        oguna::EncodingConverter{}.Cp932ToUtf16(f.name.c_str(), (int)f.name.length(), &name);
-        boneKeyframes[name].push_back(&f);
-    }
-    for (const auto& f : motion->face_frames) {
-        wstring name;
-        oguna::EncodingConverter{}.Cp932ToUtf16(f.face_name.c_str(), (int)f.face_name.length(), &name);
-        faceKeyframes[name].push_back(&f);
-    }
-    for (const auto& f : motion->ik_frames) {
-        for (const auto& ik : f.ik_enable) {
-            wstring name;
-            oguna::EncodingConverter{}.Cp932ToUtf16(ik.ik_name.c_str(), (int)ik.ik_name.length(), &name);
-            ikKeyframes[name].push_back(&f);
-        }
-    }
-
     NodeManager _nodeManager;
     _nodeManager.Init(model.bones, model.bone_count);
 

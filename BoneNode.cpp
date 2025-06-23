@@ -54,20 +54,17 @@ unsigned int BoneNode::GetMaxFrameNo() const {
 
 void BoneNode::UpdateLocalTransform()
 {
-    glm::mat4 scale = glm::mat4(1.0f);  // 생략 가능
+    glm::mat4 scale = glm::mat4(1.0f);
 
-    // 애니메이션 회전 (IK 적용 포함)
     glm::mat4 rotation = glm::toMat4(_animateRotation);
     if (_enableIK)
     {
         rotation = rotation * glm::toMat4(_ikRotation);
     }
 
-    // 위치: 기본 위치 + 애니메이션 델타 위치
     glm::vec3 t = _position + _animatePosition;
     glm::mat4 translate = glm::translate(glm::mat4(1.0f), t);
 
-    // 최종 로컬 트랜스폼 = 스케일 * 회전 * 이동
     _localTransform = translate * rotation * scale;
 }
 
