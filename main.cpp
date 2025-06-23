@@ -231,10 +231,17 @@ public:
     }
 
     void UpdateLocalTransform() {
-        glm::mat4 Ranim = glm::toMat4(_animateRotation);
-        glm::mat4 T = glm::translate(glm::mat4(1.0f), _position + _animatePosition);
-        _localTransform = T * Ranim;
+        glm::mat4 scale = glm::mat4(1.0f);
+
+        glm::mat4 rotation = glm::toMat4(_animateRotation);
+
+        glm::vec3 t = _animatePosition + _position;
+
+        glm::mat4 translate = glm::translate(glm::mat4(1.0f), t);
+
+        _localTransform = translate * rotation * scale;
     }
+
     void UpdateGlobalTransform() {
         if (_parentBoneNode == nullptr)
         {
@@ -251,7 +258,7 @@ public:
         }
     }
 
-    void AnimateMotion(unsigned int frameNo) {
+    void AnimateMotion(float frameNo) {
         _animateRotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
         _animatePosition = glm::vec3(0.0f);
 
@@ -445,7 +452,7 @@ public:
         return nullptr;
     }
 
-    void UpdateAnimation(unsigned int frameNo) {
+    void UpdateAnimation(float frameNo) {
         for (BoneNode* curNode : _boneNodeByIdx)
         {
             curNode->AnimateMotion(frameNo);
@@ -475,30 +482,6 @@ public:
     std::vector<BoneNode*> _sortedNodes;
 
     unsigned int _duration = 0;
-};
-
-float BezierInterpolate(float x, glm::vec2 a, glm::vec2 b, int iter = 10, float epsilon = 1e-5f) {
-    if (a.x == a.y && b.x == b.y)
-        return x;
-
-    float t = x;
-    float k0 = 1 + 3 * a.x - 3 * b.x;
-    float k1 = 3 * b.x - 6 * a.x;
-    float k2 = 3 * a.x;
-
-    for (int i = 0; i < iter; ++i) {
-        float ft = k0 * t * t * t + k1 * t * t + k2 * t - x;
-        if (fabs(ft) < epsilon) break;
-        t -= ft / 2.0f;  // 근사 방식
-    }
-
-    float r = 1 - t;
-    return t * t * t + 3 * t * t * r * b.y + 3 * t * r * r * a.y;
-}
-
-struct BonePose {
-    glm::vec3 position;
-    glm::quat orientation;
 };
 
 class Shader {
@@ -968,15 +951,13 @@ int main()
 
         // 현재 시간 기반 프레임 계산 (애니메이션은 30fps 기준 시간축 사용)
         float time = static_cast<float>(glfwGetTime());
-        float frameTime = time * 30.0f;                    // ⬅️ 실수형 시간
-        int currentFrame = static_cast<int>(frameTime);    // ⬅️ 정수 프레임 (예: 0~N)
-        float fraction = frameTime - currentFrame;         // ⬅️ 보간 잔여
+        float frameTime = time * 30.0f;
 
         // 이전 프레임 상태 초기화
         copy(originalMaterials.begin(), originalMaterials.end(), model.materials.get());
         gVertices = originalVertices;
 
-        _nodeManager.UpdateAnimation(currentFrame);
+        _nodeManager.UpdateAnimation(frameTime);
 
         std::vector<glm::mat4> boneMatrices;
         for (int i = 0; i < _nodeManager._boneNodeByIdx.size(); ++i)
