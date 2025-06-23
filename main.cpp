@@ -874,9 +874,6 @@ int main()
 
     glBindVertexArray(0);
 
-    unordered_map<wstring, BonePose> bonePoses;
-    unordered_map<wstring, float> morphWeights;
-
     vector<pmx::PmxMaterial> originalMaterials(
         model.materials.get(),
         model.materials.get() + model.material_count
@@ -904,9 +901,6 @@ int main()
             ikKeyframes[name].push_back(&f);
         }
     }
-
-    vector<glm::mat4> globalMatrices(model.bone_count);
-    vector<glm::mat4> localMatrices(model.bone_count);
 
     NodeManager _nodeManager;
     _nodeManager.Init(model.bones, model.bone_count);
@@ -988,88 +982,6 @@ int main()
         copy(originalMaterials.begin(), originalMaterials.end(), model.materials.get());
         gVertices = originalVertices;
 
-        // 본 프레임 적용
-        bonePoses.clear();
-        for (const auto& [name, frames] : boneKeyframes) {
-            if (frames.empty()) continue;
-            int prev = -1, next = -1;
-            for (int i = 0; i < frames.size(); ++i) {
-                if (frames[i]->frame > currentFrame) {
-                    next = i;
-                    break;
-                }
-                prev = i;
-            }
-
-            if (prev < 0 || next < 0) continue;
-            const auto* f1 = frames[prev];
-            const auto* f2 = frames[next];
-
-            float rawT = (frameTime - f1->frame) / float(f2->frame - f1->frame);
-
-            const uint8_t* interp = reinterpret_cast<const uint8_t*>(&f2->interpolation);
-
-            glm::vec2 p1x(interp[0], interp[1]);
-            glm::vec2 p2x(interp[8], interp[9]);
-            float tx = BezierInterpolate(rawT, p1x / 127.0f, p2x / 127.0f, 12);
-
-            glm::vec2 p1y(interp[16], interp[17]);
-            glm::vec2 p2y(interp[24], interp[25]);
-            float ty = BezierInterpolate(rawT, p1y / 127.0f, p2y / 127.0f, 12);
-
-            glm::vec2 p1z(interp[32], interp[33]);
-            glm::vec2 p2z(interp[40], interp[41]);
-            float tz = BezierInterpolate(rawT, p1z / 127.0f, p2z / 127.0f, 12);
-
-            glm::vec2 p1r(interp[48], interp[49]);
-            glm::vec2 p2r(interp[56], interp[57]);
-            float tr = BezierInterpolate(rawT, p1r / 127.0f, p2r / 127.0f, 12);
-
-            // 위치 보간
-            glm::vec3 p1(f1->position[0], f1->position[1], f1->position[2]);
-            glm::vec3 p2(f2->position[0], f2->position[1], f2->position[2]);
-            glm::vec3 pos = glm::vec3(
-                glm::mix(p1.x, p2.x, glm::clamp(tx, 0.0f, 1.0f)),
-                glm::mix(p1.y, p2.y, glm::clamp(ty, 0.0f, 1.0f)),
-                glm::mix(p1.z, p2.z, glm::clamp(tz, 0.0f, 1.0f))
-            );
-
-            // 회전 보간
-            glm::quat q1(f1->orientation[3], f1->orientation[0], f1->orientation[1], f1->orientation[2]);
-            glm::quat q2(f2->orientation[3], f2->orientation[0], f2->orientation[1], f2->orientation[2]);
-            glm::quat rot = glm::slerp(q1, q2, glm::clamp(tr, 0.0f, 1.0f));
-
-            BonePose pose;
-            pose.position = pos;
-            pose.orientation = rot;
-
-            bonePoses[name] = pose;
-        }
-
-        for (int i = 0; i < model.bone_count; ++i) {
-            const auto& bone = model.bones[i];
-            glm::vec3 pivot(bone.position[0], bone.position[1], bone.position[2]);
-            glm::mat4 Trest = glm::translate(glm::mat4(1.0f), pivot);
-
-            auto it = bonePoses.find(bone.bone_name);
-            if (it != bonePoses.end()) {
-                glm::mat4 Tanim = glm::translate(glm::mat4(1.0f), it->second.position);
-                glm::mat4 Ranim = glm::toMat4(it->second.orientation);
-                localMatrices[i] = Trest * Tanim * Ranim * glm::inverse(Trest);
-            }
-            else {
-                localMatrices[i] = glm::mat4(1.0f);
-            }
-        }
-
-        for (int i = 0; i < model.bone_count; ++i) {
-            int parent = model.bones[i].parent_index;
-            if (parent >= 0)
-                globalMatrices[i] = globalMatrices[parent] * localMatrices[i];
-            else
-                globalMatrices[i] = localMatrices[i];
-        }
-
         _nodeManager.UpdateAnimation(currentFrame);
 
         std::vector<glm::mat4> boneMatrices;
@@ -1083,9 +995,6 @@ int main()
 
         GLint loc = glGetUniformLocation(shader.ID, "boneMatrices");
         glUniformMatrix4fv(loc, static_cast<GLsizei>(boneMatrices.size()), GL_FALSE, glm::value_ptr(boneMatrices[0]));
-
-        /*GLint loc = glGetUniformLocation(shader.ID, "boneMatrices");
-        glUniformMatrix4fv(loc, static_cast<GLsizei>(globalMatrices.size()), GL_FALSE, glm::value_ptr(globalMatrices[0]));*/
 
         glBindBuffer(GL_ARRAY_BUFFER, vbo);
         glBufferData(GL_ARRAY_BUFFER, gVertices.size() * sizeof(GLVertex), gVertices.data(), GL_STATIC_DRAW);
