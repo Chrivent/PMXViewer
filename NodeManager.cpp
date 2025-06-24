@@ -28,6 +28,22 @@ void NodeManager::Init(std::unique_ptr<pmx::PmxBone[]>& bones, size_t boneCount)
 
         const pmx::PmxBone& currentPmxBone = bones[index];
 
+        bool appendRotate = currentPmxBone.bone_flag & 0x0100;
+        bool appendTranslate = currentPmxBone.bone_flag & 0x0200;
+        currentBoneNode->_isAppendRotate = appendRotate;
+        currentBoneNode->_isAppendTranslate = appendTranslate;
+        if ((appendRotate || appendTranslate) && currentPmxBone.grant_parent_index < _boneNodeByIdx.size())
+        {
+            if (index > currentPmxBone.grant_parent_index)
+            {
+                bool appendLocal = (uint16_t)currentPmxBone.bone_flag & 0x0400;
+                BoneNode* appendBoneNode = _boneNodeByIdx[currentPmxBone.grant_parent_index];
+                currentBoneNode->_isAppendLocal = appendLocal;
+                currentBoneNode->_appendBoneNode = appendBoneNode;
+                currentBoneNode->_appendWeight = currentPmxBone.grant_weight;
+            }
+        }
+
         if ((currentPmxBone.bone_flag & 0x0020) && currentPmxBone.ik_target_bone_index < _boneNodeByIdx.size())
         {
             BoneNode* targetNode = _boneNodeByIdx[currentPmxBone.ik_target_bone_index];
@@ -144,6 +160,12 @@ void NodeManager::UpdateAnimation(float frameNo) {
 
     for (BoneNode* curNode : _sortedNodes)
     {
+        if (curNode->_appendBoneNode != nullptr)
+        {
+            curNode->UpdateAppendTransform();
+            curNode->UpdateGlobalTransform();
+        }
+
         IKSolver* curSolver = curNode->_ikSolver;
         if (curSolver != nullptr)
         {

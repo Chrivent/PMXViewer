@@ -56,16 +56,26 @@ void BoneNode::UpdateLocalTransform()
 {
     glm::mat4 scale = glm::mat4(1.0f);
 
-    glm::mat4 rotation = glm::toMat4(_animateRotation);
-    if (_enableIK)
+    glm::quat rotation = _animateRotation;
+    if (_enableIK == true)
     {
-        rotation = glm::toMat4(_ikRotation) * rotation;
+        rotation = _ikRotation * rotation;
+    }
+
+    if (_isAppendRotate == true)
+    {
+        rotation = _appendRotation * rotation;
     }
 
     glm::vec3 t = _position + _animatePosition;
+    if (_isAppendTranslate)
+    {
+        t += _appendTranslate;
+    }
+
     glm::mat4 translate = glm::translate(glm::mat4(1.0f), t);
 
-    _localTransform = translate * rotation * scale;
+    _localTransform = translate * glm::toMat4(rotation) * scale;
 }
 
 void BoneNode::UpdateGlobalTransform() {
@@ -207,4 +217,65 @@ void BoneNode::AnimateIK(float frameNo)
     {
         _ikSolver->_enable = it->enable;
     }
+}
+
+void BoneNode::UpdateAppendTransform()
+{
+    if (_appendBoneNode == nullptr)
+    {
+        return;
+    }
+
+    glm::quat appendRotation;
+    if (_isAppendRotate == true)
+    {
+        if (_isAppendLocal == true)
+        {
+            appendRotation = _appendBoneNode->_animateRotation;
+        }
+        else
+        {
+            if (_appendBoneNode->_appendBoneNode == nullptr)
+            {
+                appendRotation = _appendBoneNode->_animateRotation;
+            }
+            else
+            {
+                appendRotation = _appendBoneNode->_appendRotation;
+            }
+        }
+
+        if (_appendBoneNode->_enableIK == true)
+        {
+            appendRotation = _appendBoneNode->_ikRotation * appendRotation;
+        }
+
+        glm::quat appendRotationQuaternion = glm::quat_cast(glm::mat3(appendRotation));
+        appendRotationQuaternion = glm::slerp(glm::quat(1, 0, 0, 0), appendRotationQuaternion, _appendWeight);
+        _appendRotation = glm::toMat4(appendRotationQuaternion);
+    }
+
+    glm::vec3 appendTranslate(0.0f);
+    if (_isAppendTranslate == true)
+    {
+        if (_isAppendLocal == true)
+        {
+            appendTranslate = _appendBoneNode->_animatePosition;
+        }
+        else
+        {
+            if (_appendBoneNode->_appendBoneNode == nullptr)
+            {
+                appendTranslate = _appendBoneNode->_animatePosition;
+            }
+            else
+            {
+                appendTranslate = _appendBoneNode->_appendTranslate;
+            }
+        }
+
+        _appendTranslate = appendTranslate;
+    }
+
+    UpdateLocalTransform();
 }

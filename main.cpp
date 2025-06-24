@@ -569,7 +569,7 @@ int main()
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         // 모델 스케일 적용
-        glm::mat4 scale = glm::scale(glm::mat4(1.0f), glm::vec3(0.3f));
+        glm::mat4 scale = glm::scale(glm::mat4(1.0f), glm::vec3(0.3f, 0.3f, -0.3f));
 
         // 카메라 위치 계산
         glm::vec3 target = cameraTarget;  // 🔄 수정: 고정값 대신 패닝 반영된 타겟 사용

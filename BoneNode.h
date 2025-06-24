@@ -67,4 +67,6 @@ public:
     IKSolver* _ikSolver = nullptr;
 
     void AnimateIK(float frameNo);
+
+    void UpdateAppendTransform();
 };
