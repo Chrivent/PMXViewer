@@ -59,6 +59,11 @@ void NodeManager::Init(std::unique_ptr<pmx::PmxBone[]>& bones, size_t boneCount)
                         ikLink.max_radian[1],
                         ikLink.max_radian[2]
                     );
+                    for (int d = 0; d < 3; ++d) {
+                        if (limitMin[d] > limitMax[d]) {
+                            std::swap(limitMin[d], limitMax[d]);
+                        }
+                    }
                     solver->AddIKChain(linkNode, true, limitMin, limitMax);
                 }
                 else
