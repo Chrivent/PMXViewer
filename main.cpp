@@ -27,8 +27,6 @@
 #include "NodeManager.h"
 #include "IKSolver.h"
 
-using namespace std;
-
 struct GLVertex {
     glm::vec3 position = glm::vec3();
     glm::vec3 normal = glm::vec3();
@@ -38,9 +36,9 @@ struct GLVertex {
 };
 
 GLuint vao, vbo, ebo;
-vector<GLVertex> gVertices;
-vector<uint32_t> gIndices;
-vector<GLuint> gTextures;
+std::vector<GLVertex> gVertices;
+std::vector<uint32_t> gIndices;
+std::vector<GLuint> gTextures;
 
 float cameraDistance = 10.0f;
 float yaw = 0.0f;
@@ -55,17 +53,17 @@ float lightYaw = 45.0f;   // 초기 조명 방향 (degree)
 float lightPitch = -45.0f;
 bool leftMouseDown = false;
 
-void LoadTextures(const pmx::PmxModel& model, const string& pmxBaseDir) {
+void LoadTextures(const pmx::PmxModel& model, const std::string& pmxBaseDir) {
     gTextures.resize(model.texture_count, 0);
 
     for (int i = 0; i < model.texture_count; ++i) {
-        string relPath(model.textures[i].begin(), model.textures[i].end()); // wstring → string
-        filesystem::path texPath = filesystem::path(pmxBaseDir) / relPath;
+        std::string relPath(model.textures[i].begin(), model.textures[i].end()); // wstring → string
+        std::filesystem::path texPath = std::filesystem::path(pmxBaseDir) / relPath;
 
         int w, h, channels;
         stbi_uc* data = stbi_load(texPath.string().c_str(), &w, &h, &channels, STBI_rgb_alpha);
         if (!data) {
-            wcerr << "텍스처 로딩 실패: " << texPath << "\n";
+            std::wcerr << "텍스처 로딩 실패: " << texPath << "\n";
             continue;
         }
 
@@ -83,7 +81,7 @@ void LoadTextures(const pmx::PmxModel& model, const string& pmxBaseDir) {
     }
 }
 
-void ApplyMorph(const pmx::PmxModel& model, vector<GLVertex>& vertices, vector<glm::mat4>& localMatrices, int morphIndex, float weight) {
+void ApplyMorph(const pmx::PmxModel& model, std::vector<GLVertex>& vertices, std::vector<glm::mat4>& localMatrices, int morphIndex, float weight) {
     if (morphIndex < 0 || morphIndex >= model.morph_count) return;
 
     const auto& morph = model.morphs[morphIndex];
@@ -190,12 +188,12 @@ public:
     GLuint ID;
 
     Shader(const char* vertexPath, const char* fragmentPath) {
-        string vertexCode;
-        string fragmentCode;
-        ifstream vShaderFile(vertexPath);
-        ifstream fShaderFile(fragmentPath);
+        std::string vertexCode;
+        std::string fragmentCode;
+        std::ifstream vShaderFile(vertexPath);
+        std::ifstream fShaderFile(fragmentPath);
 
-        stringstream vShaderStream, fShaderStream;
+        std::stringstream vShaderStream, fShaderStream;
         vShaderStream << vShaderFile.rdbuf();
         fShaderStream << fShaderFile.rdbuf();
         vertexCode = vShaderStream.str();
@@ -225,7 +223,7 @@ public:
         glUseProgram(ID);
     }
 
-    void setMat4(const string& name, const glm::mat4& mat) const {
+    void setMat4(const std::string& name, const glm::mat4& mat) const {
         glUniformMatrix4fv(glGetUniformLocation(ID, name.c_str()), 1, GL_FALSE, glm::value_ptr(mat));
     }
 };
@@ -234,7 +232,7 @@ public:
 void ScrollCallback(GLFWwindow* window, double xoffset, double yoffset)
 {
     cameraDistance -= static_cast<float>(yoffset);
-    cameraDistance = clamp(cameraDistance, 2.0f, 100.0f);
+    cameraDistance = std::clamp(cameraDistance, 2.0f, 100.0f);
 }
 
 void MouseButtonCallback(GLFWwindow* window, int button, int action, int mods)
@@ -263,7 +261,7 @@ void CursorPosCallback(GLFWwindow* window, double xpos, double ypos)
         float sensitivity = 0.3f;
         yaw -= dx * sensitivity;
         pitch += dy * sensitivity;
-        pitch = clamp(pitch, -89.0f, 89.0f);
+        pitch = std::clamp(pitch, -89.0f, 89.0f);
     }
 
     if (middleMouseDown) {
@@ -288,19 +286,19 @@ void CursorPosCallback(GLFWwindow* window, double xpos, double ypos)
         float lightSensitivity = 0.3f;
         lightYaw -= dx * lightSensitivity;
         lightPitch += dy * lightSensitivity;
-        lightPitch = clamp(lightPitch, -89.0f, 89.0f);
+        lightPitch = std::clamp(lightPitch, -89.0f, 89.0f);
     }
 }
 
-vector<wstring> FindAllPMXFiles(const wstring& folderPath) {
-    vector<wstring> result;
+std::vector<std::wstring> FindAllPMXFiles(const std::wstring& folderPath) {
+    std::vector<std::wstring> result;
 
-    if (!filesystem::exists(folderPath) || !filesystem::is_directory(folderPath)) {
-        wcerr << "폴더가 존재하지 않거나 디렉토리가 아닙니다: " << folderPath << "\n";
+    if (!std::filesystem::exists(folderPath) || !std::filesystem::is_directory(folderPath)) {
+        std::wcerr << "폴더가 존재하지 않거나 디렉토리가 아닙니다: " << folderPath << "\n";
         return result;
     }
 
-    for (const auto& entry : filesystem::recursive_directory_iterator(folderPath)) {
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(folderPath)) {
         if (entry.is_regular_file() && entry.path().extension() == ".pmx") {
             result.push_back(entry.path().wstring());
         }
@@ -309,15 +307,15 @@ vector<wstring> FindAllPMXFiles(const wstring& folderPath) {
     return result;
 }
 
-vector<wstring> FindAllVMDFiles(const wstring& folderPath) {
-    vector<wstring> result;
+std::vector<std::wstring> FindAllVMDFiles(const std::wstring& folderPath) {
+    std::vector<std::wstring> result;
 
-    if (!filesystem::exists(folderPath) || !filesystem::is_directory(folderPath)) {
-        wcerr << L"폴더가 존재하지 않거나 디렉토리가 아닙니다: " << folderPath << "\n";
+    if (!std::filesystem::exists(folderPath) || !std::filesystem::is_directory(folderPath)) {
+        std::wcerr << L"폴더가 존재하지 않거나 디렉토리가 아닙니다: " << folderPath << "\n";
         return result;
     }
 
-    for (const auto& entry : filesystem::recursive_directory_iterator(folderPath)) {
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(folderPath)) {
         if (entry.is_regular_file() && entry.path().extension() == ".vmd") {
             result.push_back(entry.path().wstring());
         }
@@ -330,69 +328,69 @@ int main()
 {
     _setmode(_fileno(stderr), _O_U16TEXT);
 
-    wstring modelFolder = L"C:/Users/Ha Yechan/Desktop/PMXViewer/models";
-    vector<wstring> pmxFiles = FindAllPMXFiles(modelFolder);
+    std::wstring modelFolder = L"C:/Users/Ha Yechan/Desktop/PMXViewer/models";
+    std::vector<std::wstring> pmxFiles = FindAllPMXFiles(modelFolder);
 
     if (pmxFiles.empty()) {
-        wcerr << L"모델 폴더에 .pmx 파일이 없습니다: " << modelFolder << "\n";
+        std::wcerr << L"모델 폴더에 .pmx 파일이 없습니다: " << modelFolder << "\n";
         return 1;
     }
 
     // 목록 출력
-    wcerr << L"[ PMX 모델 목록 ]\n";
+    std::wcerr << L"[ PMX 모델 목록 ]\n";
     for (size_t i = 0; i < pmxFiles.size(); ++i) {
-        wcerr << i << ": " << pmxFiles[i] << "\n";
+        std::wcerr << i << ": " << pmxFiles[i] << "\n";
     }
 
     // 선택 입력
     int selected = -1;
-    wcerr << L"\n불러올 모델 번호를 입력하세요: ";
-    cin >> selected;
+    std::wcerr << L"\n불러올 모델 번호를 입력하세요: ";
+    std::cin >> selected;
 
     if (selected < 0 || selected >= static_cast<int>(pmxFiles.size())) {
-        wcerr << L"잘못된 선택입니다.\n";
+        std::wcerr << L"잘못된 선택입니다.\n";
         return 1;
     }
 
-    wstring pmxPath = pmxFiles[selected];
-    wcerr << L"선택된 PMX 파일: " << pmxPath << "\n";
+    std::wstring pmxPath = pmxFiles[selected];
+    std::wcerr << L"선택된 PMX 파일: " << pmxPath << "\n";
 
-    wstring vmdFolder = L"C:/Users/Ha Yechan/Desktop/PMXViewer/motions";
-    vector<wstring> vmdFiles = FindAllVMDFiles(vmdFolder); // 확장자 필터링 함수 개선 권장
+    std::wstring vmdFolder = L"C:/Users/Ha Yechan/Desktop/PMXViewer/motions";
+    std::vector<std::wstring> vmdFiles = FindAllVMDFiles(vmdFolder); // 확장자 필터링 함수 개선 권장
 
     if (vmdFiles.empty()) {
-        wcerr << L"모델 폴더에 .vmd 파일이 없습니다: " << modelFolder << "\n";
+        std::wcerr << L"모델 폴더에 .vmd 파일이 없습니다: " << modelFolder << "\n";
         return 1;
     }
 
-    wcerr << L"\n[ VMD 파일 목록 ]\n";
+    std::wcerr << L"\n[ VMD 파일 목록 ]\n";
     for (size_t i = 0; i < vmdFiles.size(); ++i) {
-        wcerr << i << L": " << vmdFiles[i] << "\n";
+        std::wcerr << i << L": " << vmdFiles[i] << "\n";
     }
 
     int vmdSelected = -1;
-    wcerr << L"\n불러올 VMD 번호를 입력하세요: ";
-    cin >> vmdSelected;
+    std::wcerr << L"\n불러올 VMD 번호를 입력하세요: ";
+    std::cin >> vmdSelected;
 
     if (vmdSelected < 0 || vmdSelected >= static_cast<int>(vmdFiles.size())) {
-        wcerr << L"잘못된 선택입니다.\n";
+        std::wcerr << L"잘못된 선택입니다.\n";
         return 1;
     }
 
-    unique_ptr<vmd::VmdMotion> motion;
+    std::unique_ptr<vmd::VmdMotion> motion;
     motion = vmd::VmdMotion::LoadFromFile(vmdFiles[vmdSelected].c_str());
     if (!motion) {
-        wcerr << L"VMD 로딩 실패!\n";
+        std::wcerr << L"VMD 로딩 실패!\n";
         return 1;
     }
 
     pmx::PmxModel model;
-    ifstream file(pmxPath, ios::binary);
+    std::ifstream file(pmxPath, std::ios::binary);
     model.Read(&file);
 
     // GLFW 초기화
     if (!glfwInit()) {
-        wcerr << L"GLFW 초기화 실패!\n";
+        std::wcerr << L"GLFW 초기화 실패!\n";
         return -1;
     }
 
@@ -408,7 +406,7 @@ int main()
     // 창 생성
     GLFWwindow* window = glfwCreateWindow(800, 600, "OpenGL 테스트 - PMXViewer", nullptr, nullptr);
     if (!window) {
-        wcerr << L"윈도우 생성 실패!\n";
+        std::wcerr << L"윈도우 생성 실패!\n";
         glfwTerminate();
         return -1;
     }
@@ -420,13 +418,13 @@ int main()
 
     // GLAD 초기화
     if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
-        wcerr << L"GLAD 초기화 실패!\n";
+        std::wcerr << L"GLAD 초기화 실패!\n";
         return -1;
     }
 
-    wcerr << L"OpenGL 버전: " << glGetString(GL_VERSION) << endl;
+    std::wcerr << L"OpenGL 버전: " << glGetString(GL_VERSION) << std::endl;
 
-    string pmxFolder = filesystem::path(pmxPath).parent_path().string();
+    std::string pmxFolder = std::filesystem::path(pmxPath).parent_path().string();
     LoadTextures(model, pmxFolder);
 
     Shader shader("C:/Users/Ha Yechan/Desktop/PMXViewer/shaders/vertex.glsl", "C:/Users/Ha Yechan/Desktop/PMXViewer/shaders/fragment.glsl");
@@ -538,12 +536,6 @@ int main()
 
     glBindVertexArray(0);
 
-    vector<pmx::PmxMaterial> originalMaterials(
-        model.materials.get(),
-        model.materials.get() + model.material_count
-    );
-    vector<GLVertex> originalVertices = gVertices;
-
     NodeManager _nodeManager;
     _nodeManager.Init(model.bones, model.bone_count);
 
@@ -617,10 +609,6 @@ int main()
         // 현재 시간 기반 프레임 계산 (애니메이션은 30fps 기준 시간축 사용)
         float time = static_cast<float>(glfwGetTime());
         float frameTime = time * 30.0f;
-
-        // 이전 프레임 상태 초기화
-        copy(originalMaterials.begin(), originalMaterials.end(), model.materials.get());
-        gVertices = originalVertices;
 
         _nodeManager.UpdateAnimation(frameTime);
 
