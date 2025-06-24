@@ -153,8 +153,13 @@ float BoneNode::GetYFromXOnBezier(float x, const glm::vec2& a, const glm::vec2& 
     float k2 = 3 * a.x;
 
     for (int i = 0; i < n; ++i) {
-        float ft = k0 * t * t * t + k1 * t * t + k2 * t - x;
-        if (fabs(ft) < epsilon) break;
+        auto ft = k0 * t * t * t + k1 * t * t + k2 * t - x;
+
+        if (ft <= epsilon && ft >= -epsilon)
+        {
+            break;
+        }
+
         t -= ft / 2.0f;
     }
 
@@ -162,7 +167,7 @@ float BoneNode::GetYFromXOnBezier(float x, const glm::vec2& a, const glm::vec2& 
     return t * t * t + 3 * t * t * r * b.y + 3 * t * r * r * a.y;
 }
 
-void BoneNode::AnimateIK(unsigned frameNo)
+void BoneNode::AnimateIK(float frameNo)
 {
     if (_motionKeys.size() <= 0 || _ikSolver == nullptr)
     {
