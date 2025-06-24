@@ -64,11 +64,11 @@ void NodeManager::Init(std::unique_ptr<pmx::PmxBone[]>& bones, size_t boneCount)
                             std::swap(limitMin[d], limitMax[d]);
                         }
                     }
-                    solver->AddIKChain(linkNode, true, limitMin, limitMax);
+                    solver->_ikChains.emplace_back(linkNode, true, limitMin, limitMax);
                 }
                 else
                 {
-                    solver->AddIKChain(linkNode, false,
+                    solver->_ikChains.emplace_back(linkNode, false,
                         glm::vec3(glm::radians(0.5f), 0.0f, 0.0f),
                         glm::vec3(glm::radians(180.0f), 0.0f, 0.0f));
                 }

@@ -385,20 +385,6 @@ int main()
         wcerr << L"VMD 로딩 실패!\n";
         return 1;
     }
-    // 이후 루프에서 이 `motion`을 사용
-
-    sort(motion->bone_frames.begin(), motion->bone_frames.end(),
-        [](const vmd::VmdBoneFrame& a, const vmd::VmdBoneFrame& b) {
-            return a.frame < b.frame;
-        });
-    sort(motion->face_frames.begin(), motion->face_frames.end(),
-        [](const vmd::VmdFaceFrame& a, const vmd::VmdFaceFrame& b) {
-            return a.frame < b.frame;
-        });
-    sort(motion->ik_frames.begin(), motion->ik_frames.end(),
-        [](const vmd::VmdIkFrame& a, const vmd::VmdIkFrame& b) {
-            return a.frame < b.frame;
-        });
 
     pmx::PmxModel model;
     ifstream file(pmxPath, ios::binary);
