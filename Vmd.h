@@ -17,13 +17,13 @@ namespace vmd
 		/// ボーン名
 		std::string name;
 		/// フレーム番号
-		int frame;
+		int frame = 0;
 		/// 位置
-		float position[3];
+		float position[3] = {};
 		/// 回転
-		float orientation[4];
+		float orientation[4] = {};
 		/// 補間曲線
-		char interpolation[4][4][4];
+		char interpolation[4][4][4] = {};
 
 		void Read(std::istream* stream)
 		{
@@ -53,9 +53,9 @@ namespace vmd
 		/// 表情名
 		std::string face_name;
 		/// 表情の重み
-		float weight;
+		float weight = 0;
 		/// フレーム番号
-		uint32_t frame;
+		uint32_t frame = 0;
 
 		void Read(std::istream* stream)
 		{
@@ -79,19 +79,19 @@ namespace vmd
 	{
 	public:
 		/// フレーム番号
-		int frame;
+		int frame = 0;
 		/// 距離
-		float distance;
+		float distance = 0;
 		/// 位置
-		float position[3];
+		float position[3] = {};
 		/// 回転
-		float orientation[3];
+		float orientation[3] = {};
 		/// 補間曲線
-		char interpolation[6][4];
+		char interpolation[6][4] = {};
 		/// 視野角
-		float angle;
+		float angle = 0.f;
 		/// 不明データ
-		char unknown[3];
+		char unknown[3] = {};
 
 		void Read(std::istream *stream)
 		{
@@ -121,11 +121,11 @@ namespace vmd
 	{
 	public:
 		/// フレーム番号
-		int frame;
+		int frame = 0;
 		/// 色
-		float color[3];
+		float color[3] = {};
 		/// 位置
-		float position[3];
+		float position[3] = {};
 
 		void Read(std::istream* stream)
 		{
@@ -147,15 +147,15 @@ namespace vmd
 	{
 	public:
 		std::string ik_name;
-		bool enable;
+		bool enable = false;
 	};
 
 	/// IKフレーム
 	class VmdIkFrame
 	{
 	public:
-		int frame;
-		bool display;
+		int frame = 0;
+		bool display = false;
 		std::vector<VmdIkEnable> ik_enable;
 
 		void Read(std::istream *stream)
@@ -196,7 +196,7 @@ namespace vmd
 		/// モデル名
 		std::string model_name;
 		/// バージョン
-		int version;
+		int version = 0;
 		/// ボーンフレーム
 		std::vector<VmdBoneFrame> bone_frames;
 		/// 表情フレーム

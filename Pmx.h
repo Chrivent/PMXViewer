@@ -170,6 +170,7 @@ namespace pmx
 	public:
 		PmxVertex()
 			: edge(0.0f)
+			, skinning_type(PmxVertexSkinningType::BDEF1)
 		{
 			uv[0] = uv[1] = 0.0f;
 			for (int i = 0; i < 3; ++i) {
@@ -435,7 +436,9 @@ namespace pmx
 	{
 	public:
 		PmxMorphMaterialOffset()
-			: specularity(0.0f)
+			: material_index(0)
+			, offset_operation(0)
+			, specularity(0.0f)
 			, edge_size(0.0f)
 		{
 			for (int i = 0; i < 3; ++i) {
@@ -512,7 +515,9 @@ namespace pmx
 	{
 	public:
 		PmxMorph()
-			: offset_count(0)
+			: category(MorphCategory::ReservedCategory)
+			, morph_type(MorphType::Group)
+			, offset_count(0)
 		{
 		}
 		/// モーフ名
@@ -705,6 +710,7 @@ namespace pmx
 			, target_material(0)
 			, group(0)
 			, mask(0)
+			, flag(PmxSoftBodyFlag::BLink)
 			, blink_distance(0)
 			, cluster_count(0)
 			, mass(0.0)

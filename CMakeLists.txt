@@ -15,7 +15,7 @@ find_package(glad CONFIG REQUIRED)
 find_package(glm CONFIG REQUIRED)
 
 # 실행 파일
-add_executable(PMXViewer "main.cpp" "stb_image.h" "stb_image_resize2.h" "EncodingHelper" "Pmx.h" "Pmx.cpp" "Vmd.h" "BoneNode.h" "BoneNode.cpp" "IKSolver.h" "IKSolver.cpp" "NodeManager.h" "NodeManager.cpp" "Morph.h" "Morph.cpp")
+add_executable(PMXViewer "main.cpp" "stb_image.h" "stb_image_resize2.h" "EncodingHelper" "Pmx.h" "Pmx.cpp" "Vmd.h" "BoneNode.h" "BoneNode.cpp" "IKSolver.h" "IKSolver.cpp" "NodeManager.h" "NodeManager.cpp" "MorphManager.h" "MorphManager.cpp")
 
 # 라이브러리 연결
 target_link_libraries(PMXViewer PRIVATE glfw glad::glad glm::glm)
