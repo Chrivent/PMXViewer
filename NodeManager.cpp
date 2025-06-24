@@ -63,7 +63,7 @@ void NodeManager::Init(std::unique_ptr<pmx::PmxBone[]>& bones, size_t boneCount)
                 }
 
                 BoneNode* linkNode = _boneNodeByIdx[linkIndex];
-                if (ikLink.angle_lock == true)
+                if (ikLink.angle_lock)
                 {
                     glm::vec3 limitMin(
                         ikLink.min_radian[0],

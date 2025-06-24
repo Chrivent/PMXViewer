@@ -326,7 +326,7 @@ std::vector<std::wstring> FindAllVMDFiles(const std::wstring& folderPath) {
 
 int main()
 {
-    _setmode(_fileno(stderr), _O_U16TEXT);
+    (void)_setmode(_fileno(stderr), _O_U16TEXT);
 
     std::wstring modelFolder = L"C:/Users/Ha Yechan/Desktop/PMXViewer/models";
     std::vector<std::wstring> pmxFiles = FindAllPMXFiles(modelFolder);
@@ -542,7 +542,7 @@ int main()
     for (auto& boneFrame : motion->bone_frames)
     {
         std::wstring name;
-        oguna::EncodingConverter{}.Cp932ToUtf16(boneFrame.name.c_str(), boneFrame.name.size(), &name);
+        oguna::EncodingConverter{}.Cp932ToUtf16(boneFrame.name.c_str(), static_cast<int>(boneFrame.name.size()), &name);
         auto boneNode = _nodeManager.GetBoneNodeByName(name);
         if (boneNode == nullptr)
         {

@@ -6,6 +6,17 @@
 
 #include "BoneNode.h"
 
+IKChain::IKChain(BoneNode* linkNode, bool axisLimit, const glm::vec3& limitMinimum, const glm::vec3& limitMaximum)
+{
+    boneNode = linkNode;
+    enableAxisLimit = axisLimit;
+    limitMin = limitMinimum;
+    limitMax = limitMaximum;
+    prevAngle = glm::vec3(0.0f);
+    saveIKRotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+    planeModeAngle = 0.f;
+}
+
 IKSolver::IKSolver(BoneNode* node, BoneNode* targetNode, unsigned int iterationCount, float limitAngle)
     : _ikNode(node),
     _targetNode(targetNode),
@@ -152,8 +163,8 @@ void IKSolver::SolveCore(unsigned int iteration) {
 
 void IKSolver::SolvePlane(unsigned int iteration, unsigned int chainIndex, SolveAxis solveAxis) {
     glm::vec3 rotateAxis;
-    float limitMinAngle;
-    float limitMaxAngle;
+    float limitMinAngle = 0.f;
+    float limitMaxAngle = 0.f;
 
     IKChain& chain = _ikChains[chainIndex];
 
@@ -281,7 +292,7 @@ glm::vec3 IKSolver::Decompose(const glm::mat4& m, const glm::vec3& before) {
         r.z = std::atan2(m[0][1], m[0][0]);
     }
 
-    const float pi = glm::pi<float>();
+    constexpr float pi = glm::pi<float>();
     std::vector<glm::vec3> tests = {
         { r.x + pi, pi - r.y, r.z + pi },
         { r.x + pi, pi - r.y, r.z - pi },
