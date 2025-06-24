@@ -37,11 +37,6 @@ public:
 
     void Solve();
 
-    void AddIKChain(BoneNode* linkNode, bool axisLimit, const glm::vec3& limitMin, const glm::vec3& limitMax)
-    {
-        _ikChains.emplace_back(linkNode, axisLimit, limitMin, limitMax);
-    }
-
 private:
     void SolveCore(unsigned int iteration);
     void SolvePlane(unsigned int iteration, unsigned int chainIndex, SolveAxis solveAxis);
