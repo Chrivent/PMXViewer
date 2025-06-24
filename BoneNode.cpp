@@ -160,7 +160,15 @@ float BoneNode::GetYFromXOnBezier(float x, const glm::vec2& a, const glm::vec2& 
             break;
         }
 
-        t -= ft / 2.0f;
+        float dft = 3 * k0 * t * t + 2 * k1 * t + k2;
+        if (dft <= epsilon && dft >= -epsilon)
+        {
+            break;
+        }
+
+        t -= ft / dft;
+
+        t = glm::clamp(t, 0.0f, 1.0f);
     }
 
     float r = 1 - t;
