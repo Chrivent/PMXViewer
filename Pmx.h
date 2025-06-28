@@ -363,7 +363,7 @@ namespace pmx
 		AdditionalUV2 = 5,
 		AdditionalUV3 = 6,
 		AdditionalUV4 = 7,
-		Matrial = 8,
+		Material = 8,
 		Flip = 9,
 		Impulse = 10,
 	};

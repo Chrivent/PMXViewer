@@ -118,7 +118,7 @@ void ApplyMorph(const pmx::PmxModel& model, std::vector<GLVertex>& vertices, std
         }
         break;
 
-    case pmx::MorphType::Matrial:
+    case pmx::MorphType::Material:
         for (int i = 0; i < morph.offset_count; ++i) {
             const auto& offset = morph.material_offsets[i];
             int mi = offset.material_index;

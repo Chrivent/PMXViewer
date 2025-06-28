@@ -362,7 +362,7 @@ namespace pmx
 				bone_offsets[i].Read(stream, setting);
 			}
 			break;
-		case MorphType::Matrial:
+		case MorphType::Material:
 			material_offsets = std::make_unique<PmxMorphMaterialOffset []>(this->offset_count);
 			for (int i = 0; i < offset_count; i++)
 			{
