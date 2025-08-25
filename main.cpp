@@ -243,16 +243,35 @@ int main()
         // 프레임마다 바뀌는 유니폼만 갱신
         SetupFrameUniforms(shader, lightDir, eye);
 
-        // — 프레임 시간(30fps 기준)
-        float t = static_cast<float>(glfwGetTime());
-        float frameTime = t * 30.0f;
+        auto ms = [](double s, double e) { return (e - s) * 1000.0; };
 
-        // — 업데이트 & 드로우 (모든 모델 로직은 PMXActor 내부)
-        actor.Update(frameTime);
+        double t0 = glfwGetTime();
+        // 애니메이션 프레임 계산
+        float seconds = (float)glfwGetTime();
+        float frameTime = seconds * 30.0f;
+
+        double t1 = glfwGetTime();
+        actor.Update(frameTime); // CPU 스키닝 포함
+        double t2 = glfwGetTime();
+
         actor.Draw(shader.ID);
+        double t3 = glfwGetTime();
 
         glfwSwapBuffers(window);
         glfwPollEvents();
+        double t4 = glfwGetTime();
+
+        static double acc = 0; acc += (t4 - t0);
+        static int c = 0; c++;
+        if (acc >= 1.0) {
+            std::cout
+                << "FPS: " << c
+                << " | Update: " << ms(t1, t2) << " ms"
+                << " | Draw: " << ms(t2, t3) << " ms"
+                << " | Swap+Evt: " << ms(t3, t4) << " ms"
+                << std::endl;
+            acc -= 1.0; c = 0;
+        }
     }
 
     // 정리

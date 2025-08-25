@@ -1,6 +1,11 @@
 #include "PMXActor.h"
 \
 #include <filesystem>
+#include <execution>
+#include <algorithm>
+
+#include <chrono>
+#include <iomanip>
 
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/quaternion.hpp>
@@ -10,6 +15,29 @@
 #include "stb_image.h"
 
 #include "BoneNode.h"
+
+struct MaterialUniforms {
+    GLint loc_bUseToon, loc_bUseSphere, loc_sphereMode;
+    GLint loc_diffuse, loc_specular, loc_specularPower;
+    GLint loc_ambient, loc_Alpha;
+};
+static std::unordered_map<GLuint, MaterialUniforms> sCache;
+
+static const MaterialUniforms& getUniforms(GLuint prog) {
+    auto it = sCache.find(prog);
+    if (it != sCache.end()) return it->second;
+    MaterialUniforms u{
+        glGetUniformLocation(prog, "bUseToon"),
+        glGetUniformLocation(prog, "bUseSphere"),
+        glGetUniformLocation(prog, "sphereMode"),
+        glGetUniformLocation(prog, "diffuse"),
+        glGetUniformLocation(prog, "specular"),
+        glGetUniformLocation(prog, "specularPower"),
+        glGetUniformLocation(prog, "ambient"),
+        glGetUniformLocation(prog, "Alpha"),
+    };
+    return sCache.emplace(prog, u).first->second;
+}
 
 PMXActor::~PMXActor() {
     if (_ebo) glDeleteBuffers(1, &_ebo);
@@ -32,9 +60,7 @@ bool PMXActor::LoadModel(const std::wstring& pmxPath) {
 
     // 텍스처
     std::string base = std::filesystem::path(pmxPath).parent_path().string();
-    if (!loadAllTextures(base)) {
-        // 텍스처 실패해도 모델은 그릴 수 있으니 hard fail은 하지 않음
-    }
+    (void)loadAllTextures(base); // 실패해도 하드 실패 X
 
     // 스키닝 파티션
     buildSkinningPartitions(_vertices.size());
@@ -42,7 +68,14 @@ bool PMXActor::LoadModel(const std::wstring& pmxPath) {
 }
 
 bool PMXActor::LoadMotion(const std::wstring& vmdPath) {
+#ifdef _WIN32
+    // Vmd.h가 Windows에서 wide 경로를 받는 오버로드가 있다면 이게 정답
     _motion = vmd::VmdMotion::LoadFromFile(vmdPath.c_str());
+#else
+    // 리눅스/맥: UTF-8로 변환해 좁은 문자열 오버로드 호출
+    std::string u8 = std::filesystem::path(vmdPath).u8string();
+    _motion = vmd::VmdMotion::LoadFromFile(u8.c_str());
+#endif
     if (!_motion) return false;
 
     // VMD bone frames -> NodeManager
@@ -100,47 +133,23 @@ void PMXActor::Update(float frameTime30) {
     if (!_glReady) return;
 
     // 1) 애니메이션 업데이트
-    _nodeManager.UpdateAnimation((unsigned)frameTime30);
+    _nodeManager.UpdateAnimation(frameTime30);
 
     // 2) 본 팔레트 갱신
     buildBonePalette();
 
-    // 3) CPU 스키닝 (병렬)
-    for (size_t i = 0; i < _ranges.size(); ++i) {
-        auto r = _ranges[i];
-        if (r.vertexCount == 0) { _futures[i] = {}; continue; }
-        _futures[i] = std::async(std::launch::async, [this, r]() {
+    // 3) CPU 스키닝 (표준 병렬 알고리즘 사용: 공용 스레드풀 활용)
+    std::for_each(std::execution::par, _ranges.begin(), _ranges.end(),
+        [this](const VertexRange& r) {
+            if (!r.vertexCount) return;
             skinningByRange(_model, _bonePalette, _vertices, r.startIndex, r.vertexCount);
-            });
-    }
-    for (auto& f : _futures) f.wait();
+        });
 
-    // 4) VBO 업데이트 (orphan + subdata)
-    uploadVertexBufferOrphaned();
-}
+    // 4) VBO 업데이트 (맵/언맵 + INVALIDATE + UNSYNC)
+    uploadVertexBufferFast();
 
-struct MaterialUniforms {
-    GLint loc_bUseToon, loc_bUseSphere, loc_sphereMode;
-    GLint loc_diffuse, loc_specular, loc_specularPower;
-    GLint loc_ambient, loc_Alpha;
-};
-
-static std::unordered_map<GLuint, MaterialUniforms> sCache;
-
-static const MaterialUniforms& getUniforms(GLuint prog) {
-    auto it = sCache.find(prog);
-    if (it != sCache.end()) return it->second;
-    MaterialUniforms u{
-        glGetUniformLocation(prog, "bUseToon"),
-        glGetUniformLocation(prog, "bUseSphere"),
-        glGetUniformLocation(prog, "sphereMode"),
-        glGetUniformLocation(prog, "diffuse"),
-        glGetUniformLocation(prog, "specular"),
-        glGetUniformLocation(prog, "specularPower"),
-        glGetUniformLocation(prog, "ambient"),
-        glGetUniformLocation(prog, "Alpha"),
-    };
-    return sCache.emplace(prog, u).first->second;
+    // 텍스처 바인딩 캐시 초기화
+    _lastTex0 = _lastTex1 = _lastTex2 = -1;
 }
 
 void PMXActor::Draw(GLuint shader) {
@@ -150,6 +159,7 @@ void PMXActor::Draw(GLuint shader) {
     glBindVertexArray(_vao);
 
     int indexOffset = 0;
+
     for (int i = 0; i < _model.material_count; ++i) {
         const auto& mat = _model.materials[i];
         const int idxCount = mat.index_count;
@@ -163,9 +173,14 @@ void PMXActor::Draw(GLuint shader) {
         const bool useToon = (toonIndex >= 0 && toonIndex < (int)_textures.size() && _textures[toonIndex]);
         const bool useSphere = (sphereIndex >= 0 && sphereIndex < (int)_textures.size() && _textures[sphereIndex]);
 
-        glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, hasDiffuse ? _textures[texIndex] : 0);
-        glActiveTexture(GL_TEXTURE1); glBindTexture(GL_TEXTURE_2D, useToon ? _textures[toonIndex] : 0);
-        glActiveTexture(GL_TEXTURE2); glBindTexture(GL_TEXTURE_2D, useSphere ? _textures[sphereIndex] : 0);
+        // 바인딩 최소화 (상태 캐시)
+        GLint want0 = hasDiffuse ? (GLint)_textures[texIndex] : 0;
+        GLint want1 = useToon ? (GLint)_textures[toonIndex] : 0;
+        GLint want2 = useSphere ? (GLint)_textures[sphereIndex] : 0;
+
+        if (_lastTex0 != want0) { glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, want0); _lastTex0 = want0; }
+        if (_lastTex1 != want1) { glActiveTexture(GL_TEXTURE1); glBindTexture(GL_TEXTURE_2D, want1); _lastTex1 = want1; }
+        if (_lastTex2 != want2) { glActiveTexture(GL_TEXTURE2); glBindTexture(GL_TEXTURE_2D, want2); _lastTex2 = want2; }
 
         glUniform1i(U.loc_bUseToon, useToon);
         glUniform1i(U.loc_bUseSphere, useSphere);
@@ -189,43 +204,14 @@ void PMXActor::Draw(GLuint shader) {
 
 void PMXActor::buildInitialVertices() {
     _vertices.clear();
-    _vertices.reserve(_model.vertex_count);
+    _vertices.resize(_model.vertex_count);
     for (int i = 0; i < _model.vertex_count; ++i) {
         const auto& src = _model.vertices[i];
-        GLVertex v;
+        GLVertex v{};
         v.position = { src.position[0], src.position[1], src.position[2] };
         v.normal = { src.normal[0],   src.normal[1],   src.normal[2] };
         v.uv = { src.uv[0],       src.uv[1] };
-
-        int idx[4] = {}; float w[4] = {};
-        switch (src.skinning_type) {
-        case pmx::PmxVertexSkinningType::BDEF1: {
-            auto* s = static_cast<pmx::PmxVertexSkinningBDEF1*>(src.skinning.get());
-            idx[0] = s->bone_index; w[0] = 1.0f; break;
-        }
-        case pmx::PmxVertexSkinningType::BDEF2: {
-            auto* s = static_cast<pmx::PmxVertexSkinningBDEF2*>(src.skinning.get());
-            idx[0] = s->bone_index1; idx[1] = s->bone_index2;
-            w[0] = s->bone_weight; w[1] = 1.0f - s->bone_weight; break;
-        }
-        case pmx::PmxVertexSkinningType::BDEF4: {
-            auto* s = static_cast<pmx::PmxVertexSkinningBDEF4*>(src.skinning.get());
-            idx[0] = s->bone_index1; idx[1] = s->bone_index2;
-            idx[2] = s->bone_index3; idx[3] = s->bone_index4;
-            w[0] = s->bone_weight1; w[1] = s->bone_weight2; w[2] = s->bone_weight3; w[3] = s->bone_weight4; break;
-        }
-        case pmx::PmxVertexSkinningType::SDEF: {
-            auto* s = static_cast<pmx::PmxVertexSkinningSDEF*>(src.skinning.get());
-            idx[0] = s->bone_index1; idx[1] = s->bone_index2;
-            w[0] = s->bone_weight;   w[1] = 1.0f - s->bone_weight; break;
-        }
-        case pmx::PmxVertexSkinningType::QDEF: {
-            auto* s = static_cast<pmx::PmxVertexSkinningQDEF*>(src.skinning.get());
-            idx[0] = s->bone_index1; idx[1] = s->bone_index2; idx[2] = s->bone_index3; idx[3] = s->bone_index4;
-            w[0] = s->bone_weight1;  w[1] = s->bone_weight2;  w[2] = s->bone_weight3;  w[3] = s->bone_weight4; break;
-        }
-        }
-        _vertices.push_back(v);
+        _vertices[i] = v;
     }
 }
 
@@ -234,7 +220,7 @@ void PMXActor::buildSkinningPartitions(size_t vertexCount) {
     unsigned threadCount = (std::min)(8u, (std::max)(2u, hw));
     threadCount = (unsigned)std::min<size_t>(threadCount, std::max<size_t>(1, vertexCount));
     _ranges.resize(threadCount);
-    _futures.resize(threadCount);
+
     unsigned div = (unsigned)vertexCount / threadCount;
     unsigned rem = (unsigned)vertexCount % threadCount;
     unsigned start = 0;
@@ -257,7 +243,6 @@ void PMXActor::buildBonePalette() {
     }
 }
 
-// (네가 기존에 쓰던 VertexSkinningByRange에서 bonePalette만 참조하게 바꾼 버전)
 void PMXActor::skinningByRange(
     const pmx::PmxModel& model,
     const std::vector<glm::mat4>& bonePalette,
@@ -344,7 +329,7 @@ void PMXActor::skinningByRange(
                 accR += qr * w[k]; accD += dq * w[k];
             }
             float len = glm::length(accR);
-            if (len < 1e-8f) { // fallback
+            if (len < 1e-8f) {
                 int b0 = ids[0];
                 if (b0 >= 0 && b0 < (int)bonePalette.size()) {
                     glm::mat4 M = bonePalette[b0];
@@ -367,8 +352,7 @@ void PMXActor::skinningByRange(
 
         if (useBlended) {
             glm::vec3 pOut = glm::vec3(blended * pos);
-            glm::mat3 nm = glm::transpose(glm::inverse(glm::mat3(blended)));
-            glm::vec3 nOut = glm::normalize(nm * nrm);
+            glm::vec3 nOut = glm::normalize(glm::mat3(blended) * nrm);
             out[i].position = pOut;
             out[i].normal = nOut;
             out[i].uv = { v.uv[0], v.uv[1] };
@@ -376,10 +360,25 @@ void PMXActor::skinningByRange(
     }
 }
 
-void PMXActor::uploadVertexBufferOrphaned() {
+// 버텍스 버퍼 업로드 최적화:
+// glMapBufferRange(GL_MAP_WRITE_BIT | GL_MAP_INVALIDATE_BUFFER_BIT | GL_MAP_UNSYNCHRONIZED_BIT)
+// 로 드라이버 동기화 비용을 피함.
+void PMXActor::uploadVertexBufferFast() {
+    const GLsizeiptr bytes = (GLsizeiptr)(_vertices.size() * sizeof(GLVertex));
     glBindBuffer(GL_ARRAY_BUFFER, _vbo);
-    glBufferData(GL_ARRAY_BUFFER, _vertices.size() * sizeof(GLVertex), nullptr, GL_DYNAMIC_DRAW); // orphan
-    glBufferSubData(GL_ARRAY_BUFFER, 0, _vertices.size() * sizeof(GLVertex), _vertices.data());
+
+    // orphan + map(unsync) 조합이 가장 호환성 좋고 빠른 편
+    glBufferData(GL_ARRAY_BUFFER, bytes, nullptr, GL_DYNAMIC_DRAW); // orphan
+    void* p = glMapBufferRange(GL_ARRAY_BUFFER, 0, bytes,
+        GL_MAP_WRITE_BIT | GL_MAP_INVALIDATE_BUFFER_BIT | GL_MAP_UNSYNCHRONIZED_BIT);
+    if (p) {
+        std::memcpy(p, _vertices.data(), (size_t)bytes);
+        glUnmapBuffer(GL_ARRAY_BUFFER);
+    }
+    else {
+        // fallback
+        glBufferSubData(GL_ARRAY_BUFFER, 0, bytes, _vertices.data());
+    }
 }
 
 bool PMXActor::loadAllTextures(const std::string& base) {
@@ -402,7 +401,8 @@ GLuint PMXActor::createTextureFromFile(const std::filesystem::path& path) {
     GLuint tex = 0;
     glGenTextures(1, &tex);
     glBindTexture(GL_TEXTURE_2D, tex);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+    // sRGB 질감일 경우(확장자 기반 추정) GL_SRGB8_ALPHA8 사용해도 좋음. 여기선 일반 RGBA.
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
