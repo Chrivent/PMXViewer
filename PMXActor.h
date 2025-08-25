@@ -24,6 +24,19 @@ struct VertexRange {
 
 struct Affine34 { float m[12]; };
 
+struct EffectiveMaterial {
+    uint8_t opType;
+    glm::vec4 diffuse;
+    glm::vec3 specular;
+    float     specularPower;
+    glm::vec3 ambient;
+    glm::vec4 edgeColor;
+    float     edgeSize;
+    glm::vec4 texFactor;
+    glm::vec4 sphereFactor;
+    glm::vec4 toonFactor;
+};
+
 class PMXActor {
 public:
     PMXActor() = default;
@@ -102,4 +115,6 @@ private:
 
     // 텍스처 바인딩 최소화 캐시
     GLint _lastTex0 = -1, _lastTex1 = -1, _lastTex2 = -1;
+
+    std::vector<EffectiveMaterial> _matCache;
 };

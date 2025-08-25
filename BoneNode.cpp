@@ -68,26 +68,21 @@ void BoneNode::UpdateLocalTransform()
 {
     glm::mat4 scale = glm::mat4(1.0f);
 
+    // 회전 조합
     glm::quat rotation = _animateRotation;
-    if (_enableIK == true)
-    {
-        rotation = _ikRotation * rotation;
-    }
-
-    if (_isAppendRotate == true)
-    {
+    if (_enableIK)
+        rotation = _ikRotation * rotation;        // (프로젝트 컨벤션에 맞게 유지)
+    if (_isAppendRotate)
         rotation = _appendRotation * rotation;
-    }
 
-    glm::vec3 t = _position + _animatePosition;
+    // 위치: base + animate + morph (+ append)
+    glm::vec3 t = _position + _animatePosition + _morphPosition;  // morph 추가
     if (_isAppendTranslate)
-    {
         t += _appendTranslate;
-    }
 
+    // 행렬 구성 (현재 방식 유지: T * R * S)
     glm::mat4 translate = glm::translate(glm::mat4(1.0f), t);
-
-    _localTransform = translate * glm::toMat4(rotation) * scale;
+    _localTransform = translate * glm::toMat4(glm::normalize(rotation)) * scale;
 }
 
 void BoneNode::UpdateGlobalTransform() {

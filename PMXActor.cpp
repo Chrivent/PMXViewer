@@ -1,4 +1,4 @@
-#include "PMXActor.h"
+ï»¿#include "PMXActor.h"
 \
 #include <filesystem>
 #include <execution>
@@ -8,7 +8,7 @@
 #include <glm/gtx/quaternion.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
-// ¡Ú STB ±¸ÇöÀº 'µü ÇÑ °÷'¿¡¼­¸¸: ¿©±â¼­ ±¸ÇöÇÏ¼¼¿ä
+// STB êµ¬í˜„ì€ 'ë”± í•œ ê³³'ì—ì„œë§Œ: ì—¬ê¸°ì„œ êµ¬í˜„í•˜ì„¸ìš”
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 
@@ -49,28 +49,28 @@ bool PMXActor::LoadModel(const std::wstring& pmxPath) {
     if (!file) return false;
     _model.Read(&file);
 
-    // ³ëµå ¸Å´ÏÀú ¼¼ÆÃ
+    // ë…¸ë“œ ë§¤ë‹ˆì € ì„¸íŒ…
     _nodeManager.Init(_model.bones, _model.bone_count);
 
-    // CPU ¹öÅØ½º/ÀÎµ¦½º ÁØºñ
+    // CPU ë²„í…ìŠ¤/ì¸ë±ìŠ¤ ì¤€ë¹„
     buildInitialVertices();
     _indices.assign(_model.indices.get(), _model.indices.get() + _model.index_count);
 
-    // ÅØ½ºÃ³
+    // í…ìŠ¤ì²˜
     std::string base = std::filesystem::path(pmxPath).parent_path().string();
-    (void)loadAllTextures(base); // ½ÇÆĞÇØµµ ÇÏµå ½ÇÆĞ X
+    (void)loadAllTextures(base); // ì‹¤íŒ¨í•´ë„ í•˜ë“œ ì‹¤íŒ¨ X
 
-    // ½ºÅ°´× ÆÄÆ¼¼Ç
+    // ìŠ¤í‚¤ë‹ íŒŒí‹°ì…˜
     buildSkinningPartitions(_vertices.size());
     return true;
 }
 
 bool PMXActor::LoadMotion(const std::wstring& vmdPath) {
 #ifdef _WIN32
-    // Vmd.h°¡ Windows¿¡¼­ wide °æ·Î¸¦ ¹Ş´Â ¿À¹ö·Îµå°¡ ÀÖ´Ù¸é ÀÌ°Ô Á¤´ä
+    // Vmd.hê°€ Windowsì—ì„œ wide ê²½ë¡œë¥¼ ë°›ëŠ” ì˜¤ë²„ë¡œë“œê°€ ìˆë‹¤ë©´ ì´ê²Œ ì •ë‹µ
     _motion = vmd::VmdMotion::LoadFromFile(vmdPath.c_str());
 #else
-    // ¸®´ª½º/¸Æ: UTF-8·Î º¯È¯ÇØ Á¼Àº ¹®ÀÚ¿­ ¿À¹ö·Îµå È£Ãâ
+    // ë¦¬ëˆ…ìŠ¤/ë§¥: UTF-8ë¡œ ë³€í™˜í•´ ì¢ì€ ë¬¸ìì—´ ì˜¤ë²„ë¡œë“œ í˜¸ì¶œ
     std::string u8 = std::filesystem::path(vmdPath).u8string();
     _motion = vmd::VmdMotion::LoadFromFile(u8.c_str());
 #endif
@@ -89,9 +89,9 @@ bool PMXActor::LoadMotion(const std::wstring& vmdPath) {
     _nodeManager.SortKey();
 
     _morphManager.Init(
-        _model.morphs.get(),                 // Æ÷ÀÎÅÍ
-        _model.morph_count,                  // °³¼ö
-        _motion->face_frames,                // ±×´ë·Î vector
+        _model.morphs.get(),                 // í¬ì¸í„°
+        _model.morph_count,                  // ê°œìˆ˜
+        _motion->face_frames,                // ê·¸ëŒ€ë¡œ vector
         static_cast<unsigned>(_model.vertex_count),
         static_cast<unsigned>(_model.material_count),
         static_cast<unsigned>(_model.bone_count)
@@ -115,7 +115,7 @@ bool PMXActor::InitGL() {
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, _indices.size() * sizeof(uint32_t),
         _indices.data(), GL_STATIC_DRAW);
 
-    // Á¤Á¡ ¼Ó¼º
+    // ì •ì  ì†ì„±
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(GLVertex), (void*)offsetof(GLVertex, position));
 
@@ -140,28 +140,28 @@ void PMXActor::SetModelScale(const glm::vec3& s) {
 void PMXActor::Update(float frameTime30) {
     if (!_glReady) return;
     
-    // 1) ¾Ö´Ï¸ŞÀÌ¼Ç ¾÷µ¥ÀÌÆ®
+    // 1) ì• ë‹ˆë©”ì´ì…˜ ì—…ë°ì´íŠ¸
     _nodeManager.BeforeUpdateAnimation();
     _morphManager.Animate(frameTime30);
     _nodeManager.UpdateAnimation(frameTime30);
     MorphMaterial();
     MorphBone();
 
-    // 2) º» ÆÈ·¹Æ® °»½Å
+    // 2) ë³¸ íŒ”ë ˆíŠ¸ ê°±ì‹ 
     buildBonePalette();
     buildBonePaletteA34();
 
-    // 3) CPU ½ºÅ°´× (Ç¥ÁØ º´·Ä ¾Ë°í¸®Áò »ç¿ë: °ø¿ë ½º·¹µåÇ® È°¿ë)
+    // 3) CPU ìŠ¤í‚¤ë‹ (í‘œì¤€ ë³‘ë ¬ ì•Œê³ ë¦¬ì¦˜ ì‚¬ìš©: ê³µìš© ìŠ¤ë ˆë“œí’€ í™œìš©)
     std::for_each(std::execution::par, _ranges.begin(), _ranges.end(),
         [this](const VertexRange& r) {
             if (!r.vertexCount) return;
             skinningByRange(_model, _bonePaletteA34, _vertices, r.startIndex, r.vertexCount);
         });
 
-    // 4) VBO ¾÷µ¥ÀÌÆ® (¸Ê/¾ğ¸Ê + INVALIDATE + UNSYNC)
+    // 4) VBO ì—…ë°ì´íŠ¸ (ë§µ/ì–¸ë§µ + INVALIDATE + UNSYNC)
     uploadVertexBufferFast();
 
-    // ÅØ½ºÃ³ ¹ÙÀÎµù Ä³½Ã ÃÊ±âÈ­
+    // í…ìŠ¤ì²˜ ë°”ì¸ë”© ìºì‹œ ì´ˆê¸°í™”
     _lastTex0 = _lastTex1 = _lastTex2 = -1;
 }
 
@@ -180,31 +180,33 @@ void PMXActor::Draw(GLuint shader) {
     std::vector<Batch> batches;
     batches.reserve(_model.material_count);
 
-    // 1) ¸ÓÅ×¸®¾ó ¡æ ÀÎµ¦½º ¿ÀÇÁ¼Â/Ä«¿îÆ®/Åõ¸í ÇÃ·¡±×·Î º¯È¯
+    // 1) ë¨¸í…Œë¦¬ì–¼ â†’ ì¸ë±ìŠ¤ ì˜¤í”„ì…‹/ì¹´ìš´íŠ¸/íˆ¬ëª… í”Œë˜ê·¸ë¡œ ë³€í™˜
     int runningOffset = 0;
     for (int i = 0; i < _model.material_count; ++i) {
         const auto& m = _model.materials[i];
-        const bool isTransparent = (m.diffuse[3] < 0.999f);
+        const float alpha = (_matCache.empty() ? m.diffuse[3] : _matCache[i].diffuse.a);
+        const bool isTransparent = (alpha < 0.999f);
         batches.push_back(Batch{ i, runningOffset, m.index_count, isTransparent });
         runningOffset += m.index_count;
     }
 
-    // 2) Á¤·Ä: ºÒÅõ¸í ¸ÕÀú, Åõ¸í ³ªÁß (³»ºÎ ¼ø¼­´Â À¯Áö)
+    // 2) ì •ë ¬: ë¶ˆíˆ¬ëª… ë¨¼ì €, íˆ¬ëª… ë‚˜ì¤‘ (ë‚´ë¶€ ìˆœì„œëŠ” ìœ ì§€)
     auto mid = std::stable_partition(batches.begin(), batches.end(),
         [](const Batch& b) { return !b.transparent; });
 
-    // (¿øÇÏ¸é Åõ¸í ±×·ì ³»ºÎ¸¦ Ãß°¡ Á¤·Ä °¡´É:
+    // (ì›í•˜ë©´ íˆ¬ëª… ê·¸ë£¹ ë‚´ë¶€ë¥¼ ì¶”ê°€ ì •ë ¬ ê°€ëŠ¥:
     // std::stable_sort(mid, batches.end(), [](const Batch& a, const Batch& b){
-    //     // ¿¹: ¾ËÆÄ°ª ¿À¸§Â÷¼ø/³»¸²Â÷¼ø µî (Á¤È®ÇÑ Åõ¸í Ã³¸®¿£ Ä«¸Ş¶ó-±â¹İ ±íÀÌ Á¤·ÄÀÌ ÇÊ¿ä)
+    //     // ì˜ˆ: ì•ŒíŒŒê°’ ì˜¤ë¦„ì°¨ìˆœ/ë‚´ë¦¼ì°¨ìˆœ ë“± (ì •í™•í•œ íˆ¬ëª… ì²˜ë¦¬ì—” ì¹´ë©”ë¼-ê¸°ë°˜ ê¹Šì´ ì •ë ¬ì´ í•„ìš”)
     //     return aAlpha < bAlpha;
     // });
 
-    // ÅØ½ºÃ³ Ä³½Ã ÃÊ±âÈ­
+    // í…ìŠ¤ì²˜ ìºì‹œ ì´ˆê¸°í™”
     _lastTex0 = _lastTex1 = _lastTex2 = -1;
 
-    // 3) µå·Î¿ì ·çÇÁ (»óÅÂ º¯°æ ¾øÀ½: Á¤·Ä¸¸ Àû¿ë)
+    // 3) ë“œë¡œìš° ë£¨í”„ (ìƒíƒœ ë³€ê²½ ì—†ìŒ: ì •ë ¬ë§Œ ì ìš©)
     for (const auto& b : batches) {
         const auto& mat = _model.materials[b.matIndex];
+        const EffectiveMaterial& em = _matCache[b.matIndex];
 
         const int texIndex = mat.diffuse_texture_index;
         const int toonIndex = mat.toon_texture_index;
@@ -227,11 +229,12 @@ void PMXActor::Draw(GLuint shader) {
         glUniform1i(U.loc_bUseSphere, useSphere);
         glUniform1i(U.loc_sphereMode, useSphere ? sphereMode : 0);
 
-        glUniform4fv(U.loc_diffuse, 1, mat.diffuse);
-        glUniform3fv(U.loc_specular, 1, mat.specular);
-        glUniform1f(U.loc_specularPower, mat.specularlity);
-        glUniform3fv(U.loc_ambient, 1, mat.ambient);
-        glUniform1f(U.loc_Alpha, mat.diffuse[3]);
+        // ëª¨í”„ ë°˜ì˜ëœ ë¨¸í‹°ë¦¬ì–¼ ê°’ ì„¸íŒ…
+        glUniform4fv(U.loc_diffuse, 1, glm::value_ptr(em.diffuse));
+        glUniform3fv(U.loc_specular, 1, glm::value_ptr(em.specular));
+        glUniform1f(U.loc_specularPower, em.specularPower);
+        glUniform3fv(U.loc_ambient, 1, glm::value_ptr(em.ambient));
+        glUniform1f(U.loc_Alpha, em.diffuse.a);
 
         glDrawElements(GL_TRIANGLES, b.indexCount, GL_UNSIGNED_INT,
             (void*)(uintptr_t)(b.indexOffset * sizeof(uint32_t)));
@@ -302,7 +305,7 @@ glm::vec3 PMXActor::transformDir(const Affine34& A, const glm::vec3& v) {
 glm::vec3 PMXActor::fastNormalize(const glm::vec3& v) {
     float d = v.x * v.x + v.y * v.y + v.z * v.z;
     if (d <= 0.f) return glm::vec3(0, 0, 1);
-    float inv = 1.0f / glm::sqrt(d); // /fp:fast or -ffast-mathÀÌ¸é ´õ ºü¸§
+    float inv = 1.0f / glm::sqrt(d); // /fp:fast or -ffast-mathì´ë©´ ë” ë¹ ë¦„
     return { v.x * inv, v.y * inv, v.z * inv };
 }
 
@@ -345,15 +348,26 @@ void PMXActor::skinningByRange(
         return (idx >= 0 && idx < bpSize) ? BP34[idx] : I;
         };
 
-    // #pragma omp parallel for schedule(static)   // º´·ÄÈ­ ¿øÇÏ¸é »ç¿ë
     for (int i = (int)start; i < (int)end; ++i)
     {
         const auto& v = model.vertices[i];
-        const glm::vec3 pos(v.position[0], v.position[1], v.position[2]);
-        const glm::vec3 nrm(v.normal[0], v.normal[1], v.normal[2]);
+
+        // --- ì›ë³¸ ê°’ ---
+        glm::vec3 basePos(v.position[0], v.position[1], v.position[2]);
+        glm::vec3 nrm(v.normal[0], v.normal[1], v.normal[2]);
+        glm::vec2 baseUv(v.uv[0], v.uv[1]);
+
+        // --- ëª¨í”„ ë¸íƒ€ ì ìš© (ë„¤ API ì§ì ‘ ì‚¬ìš©) ---
+        const glm::vec3 dpos = _morphManager.GetMorphVertexPosition((unsigned)i); // ìœ„ì¹˜ ëª¨í”„
+        const glm::vec4 muv4 = _morphManager.GetMorphUV((unsigned)i);             // UV ëª¨í”„(vec4) â†’ xy ì‚¬ìš©
+        const glm::vec2 duv = glm::vec2(muv4.x, muv4.y);
+
+        // ìœ„ì¹˜ ëª¨í•‘ì€ ìŠ¤í‚¤ë‹ "ì…ë ¥"ì— ë”í•œë‹¤
+        const glm::vec3 pos = basePos + dpos;
 
         GLVertex& dst = outBase[i];
-        dst.uv = { v.uv[0], v.uv[1] };
+        // UV ëª¨í•‘ì€ ìŠ¤í‚¤ë‹ê³¼ ë¬´ê´€í•˜ë¯€ë¡œ ê²°ê³¼ì— ë”í•˜ê¸°ë§Œ í•˜ë©´ ë¨
+        dst.uv = baseUv + duv;
 
         switch (v.skinning_type)
         {
@@ -390,11 +404,10 @@ void PMXActor::skinningByRange(
 
             glm::vec3 pAcc(0.0f), nAcc(0.0f);
             for (int k = 0; k < 4; ++k) {
-                const float wk = w[k];
-                if (wk == 0.0f) continue;
+                if (w[k] == 0.0f) continue;
                 const Affine34& Ak = getA(id[k]);
-                pAcc += transformPoint(Ak, pos) * wk;
-                nAcc += transformDir(Ak, nrm) * wk;
+                pAcc += transformPoint(Ak, pos) * w[k];
+                nAcc += transformDir(Ak, nrm) * w[k];
             }
             dst.position = pAcc;
             dst.normal = fastNormalize(nAcc);
@@ -402,15 +415,9 @@ void PMXActor::skinningByRange(
         }
         case pmx::PmxVertexSkinningType::SDEF:
         {
-            // SDEFÀº Á¤È® ±¸ÇöÀ» À§ÇØ È¸Àü º¸°£/Áß°£Á¡ °è»êÀÌ ÇÊ¿äÇÏ¹Ç·Î ±âÁ¸ mat4 ÆÈ·¹Æ®¸¦ »ç¿ë.
+            // SDEF/QDEFëŠ” ê¸°ì¡´ êµ¬í˜„ ìœ ì§€.
             const auto* s = static_cast<pmx::PmxVertexSkinningSDEF*>(v.skinning.get());
             const int i0 = s->bone_index1, i1 = s->bone_index2;
-            if (i0 < 0 || i1 < 0 || i0 >= (int)_bonePalette.size() || i1 >= (int)_bonePalette.size()) {
-                const Affine34& A = getA(i0);
-                dst.position = transformPoint(A, pos);
-                dst.normal = fastNormalize(transformDir(A, nrm));
-                break;
-            }
 
             const float w0 = s->bone_weight, w1 = 1.0f - w0;
             const glm::mat4& M0 = _bonePalette[i0];
@@ -431,6 +438,7 @@ void PMXActor::skinningByRange(
             const glm::vec3 cr0 = 0.5f * (C + r0);
             const glm::vec3 cr1 = 0.5f * (C + r1);
 
+            // posëŠ” basePos + dpos (ëª¨í•‘ ì ìš©)ì„
             const glm::vec3 pOut = glm::vec3(R * glm::vec4(pos - C, 1.0f))
                 + glm::vec3(M0 * glm::vec4(cr0, 1.0f)) * w0
                 + glm::vec3(M1 * glm::vec4(cr1, 1.0f)) * w1;
@@ -441,69 +449,59 @@ void PMXActor::skinningByRange(
         }
         case pmx::PmxVertexSkinningType::QDEF:
         {
-            // QDEFµµ È¸Àü/½Ö´ëÄõÅÍ´Ï¾ğ ´©Àû Æ¯¼º»ó mat4/quat ÇÊ¿ä ¡æ ±âÁ¸ ÆÈ·¹Æ® »ç¿ë
+            // ë„¤ê°€ ì´ë¯¸ ì‘ì„±í•œ QDEF êµ¬í˜„ ê·¸ëŒ€ë¡œ. posë§Œ ë°”ë€ ì  ìœ ì˜.
             const auto* qd = static_cast<pmx::PmxVertexSkinningQDEF*>(v.skinning.get());
             int   ids[4] = { qd->bone_index1, qd->bone_index2, qd->bone_index3, qd->bone_index4 };
             float w[4] = { qd->bone_weight1, qd->bone_weight2, qd->bone_weight3, qd->bone_weight4 };
 
             float sum = w[0] + w[1] + w[2] + w[3];
-            if (sum > 0.0f) { float inv = 1.0f / sum; w[0] *= inv; w[1] *= inv; w[2] *= inv; w[3] *= inv; }
+            if (sum > 0.0f) { float inv = 1.0f / sum; for (int k = 0; k < 4; ++k) w[k] *= inv; }
 
-            glm::quat accR(1, 0, 0, 0), accD(0, 0, 0, 0);
-            bool has = false; glm::quat ref(1, 0, 0, 0);
-
+            glm::quat accR(1, 0, 0, 0), accD(0, 0, 0, 0); bool has = false; glm::quat ref(1, 0, 0, 0);
             for (int k = 0; k < 4; ++k) {
                 if (w[k] <= 0.0f) continue;
-                const int id = ids[k];
-                if (id < 0 || id >= (int)_bonePalette.size()) continue;
-
+                int id = ids[k]; if (id < 0 || id >= (int)_bonePalette.size()) continue;
                 const glm::mat4& M = _bonePalette[id];
                 glm::quat qr = glm::normalize(glm::quat_cast(M));
                 const glm::vec3 t(M[3]);
                 glm::quat dq = 0.5f * (glm::quat(0, t.x, t.y, t.z) * qr);
-
                 if (!has) { ref = qr; has = true; }
                 else if (glm::dot(qr, ref) < 0) { qr = -qr; dq = -dq; }
-
                 accR += qr * w[k];
                 accD += dq * w[k];
             }
-
             float len = glm::length(accR);
             if (len < 1e-8f) {
-                const glm::mat4& M = (ids[0] >= 0 && ids[0] < (int)_bonePalette.size()) ? _bonePalette[ids[0]] : glm::mat4(1.0f);
-                dst.position = glm::vec3(M * glm::vec4(pos, 1.0f));
+                const glm::mat4& M = (ids[0] >= 0 && ids[0] < (int)_bonePalette.size()) ? _bonePalette[ids[0]] : glm::mat4(1);
+                dst.position = glm::vec3(M * glm::vec4(pos, 1.0f));        // pos ì‚¬ìš©
                 dst.normal = fastNormalize(glm::mat3(M) * nrm);
                 break;
             }
-
             accR /= len; accD /= len;
             glm::quat tq = accD * glm::conjugate(accR) * 2.0f;
             const glm::vec3 tf(tq.x, tq.y, tq.z);
-
             glm::mat4 R = glm::mat4_cast(accR);
             R[3] = glm::vec4(tf, 1.0f);
-
-            dst.position = glm::vec3(R * glm::vec4(pos, 1.0f));
+            dst.position = glm::vec3(R * glm::vec4(pos, 1.0f));            // pos ì‚¬ìš©
             dst.normal = fastNormalize(glm::mat3_cast(accR) * nrm);
             break;
         }
         default:
-            dst.position = pos;
+            dst.position = pos;                    // ëª¨í•‘ë§Œ ì ìš©
             dst.normal = fastNormalize(nrm);
             break;
         }
     }
 }
 
-// ¹öÅØ½º ¹öÆÛ ¾÷·Îµå ÃÖÀûÈ­:
+// ë²„í…ìŠ¤ ë²„í¼ ì—…ë¡œë“œ ìµœì í™”:
 // glMapBufferRange(GL_MAP_WRITE_BIT | GL_MAP_INVALIDATE_BUFFER_BIT | GL_MAP_UNSYNCHRONIZED_BIT)
-// ·Î µå¶óÀÌ¹ö µ¿±âÈ­ ºñ¿ëÀ» ÇÇÇÔ.
+// ë¡œ ë“œë¼ì´ë²„ ë™ê¸°í™” ë¹„ìš©ì„ í”¼í•¨.
 void PMXActor::uploadVertexBufferFast() {
     const GLsizeiptr bytes = (GLsizeiptr)(_vertices.size() * sizeof(GLVertex));
     glBindBuffer(GL_ARRAY_BUFFER, _vbo);
 
-    // orphan + map(unsync) Á¶ÇÕÀÌ °¡Àå È£È¯¼º ÁÁ°í ºü¸¥ Æí
+    // orphan + map(unsync) ì¡°í•©ì´ ê°€ì¥ í˜¸í™˜ì„± ì¢‹ê³  ë¹ ë¥¸ í¸
     glBufferData(GL_ARRAY_BUFFER, bytes, nullptr, GL_DYNAMIC_DRAW); // orphan
     void* p = glMapBufferRange(GL_ARRAY_BUFFER, 0, bytes,
         GL_MAP_WRITE_BIT | GL_MAP_INVALIDATE_BUFFER_BIT | GL_MAP_UNSYNCHRONIZED_BIT);
@@ -537,7 +535,7 @@ GLuint PMXActor::createTextureFromFile(const std::filesystem::path& path) {
     GLuint tex = 0;
     glGenTextures(1, &tex);
     glBindTexture(GL_TEXTURE_2D, tex);
-    // sRGB Áú°¨ÀÏ °æ¿ì(È®ÀåÀÚ ±â¹İ ÃßÁ¤) GL_SRGB8_ALPHA8 »ç¿ëÇØµµ ÁÁÀ½. ¿©±â¼± ÀÏ¹İ RGBA.
+    // sRGB ì§ˆê°ì¼ ê²½ìš°(í™•ì¥ì ê¸°ë°˜ ì¶”ì •) GL_SRGB8_ALPHA8 ì‚¬ìš©í•´ë„ ì¢‹ìŒ. ì—¬ê¸°ì„  ì¼ë°˜ RGBA.
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
@@ -548,10 +546,138 @@ GLuint PMXActor::createTextureFromFile(const std::filesystem::path& path) {
     return tex;
 }
 
+// PMXActor.cpp
+static glm::vec3 mixMul(const glm::vec3& base, const glm::vec3& factor, float w) {
+    // base * lerp(1, factor, w)
+    return base * (glm::vec3(1.0f) + (factor - glm::vec3(1.0f)) * w);
+}
+static glm::vec4 mixMul4(const glm::vec4& base, const glm::vec4& factor, float w) {
+    return base * (glm::vec4(1.0f) + (factor - glm::vec4(1.0f)) * w);
+}
+static float mixMul1(float base, float factor, float w) {
+    return base * (1.0f + (factor - 1.0f) * w);
+}
+
 void PMXActor::MorphMaterial()
 {
+    // ëª¨í”„ ê²°ê³¼ ìºì‹œ í¬ê¸° ë³´ì •
+    if (_matCache.size() != static_cast<size_t>(_model.material_count))
+        _matCache.resize(_model.material_count);
+
+    auto lerp = [](float a, float b, float t) { return a + (b - a) * t; };
+    auto lerp3 = [&](const glm::vec3& a, const glm::vec3& b, float t) {
+        return glm::vec3(lerp(a.x, b.x, t), lerp(a.y, b.y, t), lerp(a.z, b.z, t));
+        };
+    auto lerp4 = [&](const glm::vec4& a, const glm::vec4& b, float t) {
+        return glm::vec4(lerp(a.x, b.x, t), lerp(a.y, b.y, t), lerp(a.z, b.z, t), lerp(a.w, b.w, t));
+        };
+
+    for (int i = 0; i < _model.material_count; ++i)
+    {
+        const pmx::PmxMaterial& base = _model.materials[i];
+
+        // PMX ê¸°ë³¸ê°’ì„ glmìœ¼ë¡œ ë³€í™˜
+        glm::vec4 baseDiffuse(base.diffuse[0], base.diffuse[1], base.diffuse[2], base.diffuse[3]);
+        glm::vec3 baseSpecular(base.specular[0], base.specular[1], base.specular[2]);
+        float     baseSpecPow = base.specularlity;
+        glm::vec3 baseAmbient(base.ambient[0], base.ambient[1], base.ambient[2]);
+        glm::vec4 baseEdgeCol(base.edge_color[0], base.edge_color[1], base.edge_color[2], base.edge_color[3]);
+        float     baseEdgeSz = base.edge_size;
+
+        // í…ìŠ¤ì²˜ ê³„ìˆ˜(ì•Œë² ë„/ìŠ¤í”¼ì–´/íˆ°)ëŠ” ê¸°ë³¸ 1
+        const glm::vec4 one4(1.0f);
+        const glm::vec4 zero4(0.0f);
+
+        // ëª¨í”„ ê°’ ê°€ì ¸ì˜¤ê¸° (ì‚¬ìš©ì ì •ì˜ êµ¬ì¡°)
+        const MaterialMorphData& mm = _morphManager.GetMorphMaterial(i);
+        const float w = mm.weight;
+        const uint8_t op = mm.opType; // 0: Add, 1: Mul (ê°€ì •)
+
+        EffectiveMaterial eff{};
+        eff.opType = op;
+
+        if (w <= 0.0f) {
+            // ëª¨í”„ê°€ ì—†ìœ¼ë©´ ì›ë³¸ ê·¸ëŒ€ë¡œ
+            eff.diffuse = baseDiffuse;
+            eff.specular = baseSpecular;
+            eff.specularPower = baseSpecPow;
+            eff.ambient = baseAmbient;
+            eff.edgeColor = baseEdgeCol;
+            eff.edgeSize = baseEdgeSz;
+            eff.texFactor = one4;
+            eff.sphereFactor = one4;
+            eff.toonFactor = one4;
+            _matCache[i] = eff;
+            continue;
+        }
+
+        if (op == 0 /* Add */)
+        {
+            eff.diffuse = baseDiffuse + mm.diffuse * w;
+            eff.specular = baseSpecular + mm.specular * w;
+            eff.specularPower = baseSpecPow + mm.specularPower * w;
+            eff.ambient = baseAmbient + mm.ambient * w;
+            eff.edgeColor = baseEdgeCol + mm.edgeColor * w;
+            eff.edgeSize = baseEdgeSz + mm.edgeSize * w;
+
+            // í…ìŠ¤ì²˜ ê³„ìˆ˜(Add ëª¨ë“œ) : ë³´í†µ (1 + delta*w) í˜•íƒœë¡œ ë‘ê³  ì…°ì´ë”ì—ì„œ ê³±í•´ì¤Œ
+            eff.texFactor = one4 + mm.textureFactor * w;
+            eff.sphereFactor = one4 + mm.sphereTextureFactor * w;
+            eff.toonFactor = one4 + mm.toonTextureFactor * w;
+        }
+        else /* Multiply */
+        {
+            // ìƒ‰/ìŠ¤ì¹¼ë¼: base * lerp(1, morph, w)
+            eff.diffuse = baseDiffuse * lerp4(glm::vec4(1), mm.diffuse, w);
+            eff.specular = baseSpecular * lerp3(glm::vec3(1), mm.specular, w);
+            eff.specularPower = baseSpecPow * lerp(1.0f, mm.specularPower, w);
+            eff.ambient = baseAmbient * lerp3(glm::vec3(1), mm.ambient, w);
+            eff.edgeColor = baseEdgeCol * lerp4(glm::vec4(1), mm.edgeColor, w);
+            eff.edgeSize = baseEdgeSz * lerp(1.0f, mm.edgeSize, w);
+
+            // í…ìŠ¤ì²˜ ê³„ìˆ˜(Mul ëª¨ë“œ) : ê³„ìˆ˜ ìì²´ë¥¼ lerp(1, morphFactor, w)ë¡œ ë§Œë“¤ì–´ì„œ ê³±ì…ˆì— ì“°ê¸°
+            eff.texFactor = lerp4(one4, mm.textureFactor, w);
+            eff.sphereFactor = lerp4(one4, mm.sphereTextureFactor, w);
+            eff.toonFactor = lerp4(one4, mm.toonTextureFactor, w);
+        }
+
+        // (ì„ íƒ) ê¸°ë³¸ì ì¸ í´ë¨í”„ â€“ ì•ŒíŒŒ/ìƒ‰ì´ ìŒìˆ˜ë¡œ ê°€ëŠ” ê±¸ ë°©ì§€í•˜ê³  ì‹¶ë‹¤ë©´ ì‚¬ìš©
+        auto clamp01 = [](float v) { return glm::clamp(v, 0.0f, 1.0f); };
+        eff.diffuse = glm::vec4(clamp01(eff.diffuse.r),
+            clamp01(eff.diffuse.g),
+            clamp01(eff.diffuse.b),
+            clamp01(eff.diffuse.a));
+        eff.specular = glm::max(eff.specular, glm::vec3(0.0f));
+        eff.ambient = glm::max(eff.ambient, glm::vec3(0.0f));
+        eff.edgeColor = glm::vec4(glm::max(eff.edgeColor.r, 0.0f),
+            glm::max(eff.edgeColor.g, 0.0f),
+            glm::max(eff.edgeColor.b, 0.0f),
+            glm::clamp(eff.edgeColor.a, 0.0f, 1.0f));
+        eff.edgeSize = glm::max(eff.edgeSize, 0.0f);
+
+        _matCache[i] = eff;
+    }
 }
 
 void PMXActor::MorphBone()
 {
+    const auto& nodes = _nodeManager._sortedNodes;
+
+    for (BoneNode* bn : nodes)
+    {
+        const int bi = bn->_boneIndex;
+
+        const BoneMorphData md = _morphManager.GetMorphBone(bi);
+        const float w = md.weight;
+
+        // 1) ìœ„ì¹˜: 0 -> md.position ì„ í˜•ë³´ê°„(ì¶”ê°€ ì˜¤í”„ì…‹)
+        bn->_morphPosition = glm::mix(glm::vec3(0.0f), md.position, w);
+
+        // 2) íšŒì „: ì ˆëŒ€ ëª¨í”„ í•´ì„ì´ë©´ (ì§€ê¸ˆì²˜ëŸ¼) animR <-> morphQ slerp
+        glm::quat animR = bn->_animateRotation;          // ì´ë¯¸ quat
+        glm::quat morphQ = glm::normalize(md.quaternion); // ë°©ì–´ì  ì •ê·œí™”
+
+        glm::quat blendedQ = glm::slerp(animR, morphQ, w);
+        bn->_animateRotation = glm::normalize(blendedQ);
+    }
 }
