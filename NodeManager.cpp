@@ -145,6 +145,15 @@ BoneNode* NodeManager::GetBoneNodeByName(std::wstring& name) const {
     return nullptr;
 }
 
+void NodeManager::BeforeUpdateAnimation()
+{
+    for (BoneNode* curNode : _boneNodeByIdx)
+    {
+        curNode->_morphPosition = glm::vec3(0.0f, 0.0f, 0.0f);
+        curNode->_morphRotation = glm::quat(0.0f, 0.0f, 0.0f, 0.0f);
+    }
+}
+
 void NodeManager::UpdateAnimation(float frameNo) {
     for (BoneNode* curNode : _boneNodeByIdx)
     {

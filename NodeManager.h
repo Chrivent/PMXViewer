@@ -15,6 +15,7 @@ public:
     BoneNode* GetBoneNodeByIndex(int index) const;
     BoneNode* GetBoneNodeByName(std::wstring& name) const;
 
+    void BeforeUpdateAnimation();
     void UpdateAnimation(float frameNo);
 
     void Dispose();

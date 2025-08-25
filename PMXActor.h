@@ -7,6 +7,7 @@
 #include "Pmx.h"
 #include "Vmd.h"
 #include "NodeManager.h"
+#include "MorphManager.h"
 
 // 정점 포맷
 struct GLVertex {
@@ -69,11 +70,15 @@ private:
     bool   loadAllTextures(const std::string& base);
     GLuint createTextureFromFile(const std::filesystem::path& path);
 
+    void MorphMaterial();
+    void MorphBone();
+
 private:
     // 데이터
     pmx::PmxModel _model;
     std::unique_ptr<vmd::VmdMotion> _motion;
     NodeManager _nodeManager;
+    MorphManager _morphManager;
 
     std::vector<GLVertex>  _vertices;  // CPU-side skinned vertices
     std::vector<uint32_t>  _indices;

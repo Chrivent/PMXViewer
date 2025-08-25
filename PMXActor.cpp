@@ -87,6 +87,16 @@ bool PMXActor::LoadMotion(const std::wstring& vmdPath) {
         }
     }
     _nodeManager.SortKey();
+
+    _morphManager.Init(
+        _model.morphs.get(),                 // 포인터
+        _model.morph_count,                  // 개수
+        _motion->face_frames,                // 그대로 vector
+        static_cast<unsigned>(_model.vertex_count),
+        static_cast<unsigned>(_model.material_count),
+        static_cast<unsigned>(_model.bone_count)
+    );
+
     return true;
 }
 
@@ -129,16 +139,20 @@ void PMXActor::SetModelScale(const glm::vec3& s) {
 
 void PMXActor::Update(float frameTime30) {
     if (!_glReady) return;
-
+    
     // 1) 애니메이션 업데이트
+    _nodeManager.BeforeUpdateAnimation();
+    _morphManager.Animate(frameTime30);
     _nodeManager.UpdateAnimation(frameTime30);
+    MorphMaterial();
+    MorphBone();
 
     // 2) 본 팔레트 갱신
     buildBonePalette();
     buildBonePaletteA34();
 
     // 3) CPU 스키닝 (표준 병렬 알고리즘 사용: 공용 스레드풀 활용)
-    std::for_each(std::execution::par_unseq, _ranges.begin(), _ranges.end(),
+    std::for_each(std::execution::par, _ranges.begin(), _ranges.end(),
         [this](const VertexRange& r) {
             if (!r.vertexCount) return;
             skinningByRange(_model, _bonePaletteA34, _vertices, r.startIndex, r.vertexCount);
@@ -525,11 +539,19 @@ GLuint PMXActor::createTextureFromFile(const std::filesystem::path& path) {
     glBindTexture(GL_TEXTURE_2D, tex);
     // sRGB 질감일 경우(확장자 기반 추정) GL_SRGB8_ALPHA8 사용해도 좋음. 여기선 일반 RGBA.
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glGenerateMipmap(GL_TEXTURE_2D);
     stbi_image_free(data);
     return tex;
+}
+
+void PMXActor::MorphMaterial()
+{
+}
+
+void PMXActor::MorphBone()
+{
 }

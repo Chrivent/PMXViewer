@@ -10,6 +10,9 @@
 #include <GLFW/glfw3.h>
 #include <glm/gtc/type_ptr.hpp>
 
+#define MINIAUDIO_IMPLEMENTATION
+#include "miniaudio.h"
+
 #include "Pmx.h"
 #include "Vmd.h"
 #include "PMXActor.h" 
@@ -26,6 +29,53 @@ double lastMouseX = 0.0, lastMouseY = 0.0;
 glm::vec3 cameraTarget = glm::vec3(0, 5, 0);
 float lightYaw = 45.0f;   // 초기 조명 방향 (degree)
 float lightPitch = -45.0f;
+
+ma_engine gAudioEngine;
+ma_sound  gAudioSound;
+bool      gAudioReady = false;
+
+// ===== 음악 파일 탐색 =====
+std::vector<std::wstring> FindAllAudioFiles(const std::wstring& folderPath) {
+    std::vector<std::wstring> result;
+    if (!std::filesystem::exists(folderPath) || !std::filesystem::is_directory(folderPath)) {
+        std::wcerr << L"폴더 없음 또는 디렉토리 아님: " << folderPath << L"\n";
+        return result;
+    }
+    static const std::vector<std::wstring> exts = { L".wav", L".mp3", L".ogg" };
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(folderPath)) {
+        if (entry.is_regular_file()) {
+            auto ext = entry.path().extension().wstring();
+            std::transform(ext.begin(), ext.end(), ext.begin(), ::towlower);
+            if (std::find(exts.begin(), exts.end(), ext) != exts.end()) {
+                result.push_back(entry.path().wstring());
+            }
+        }
+    }
+    return result;
+}
+
+void KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mods)
+{
+    if (action != GLFW_PRESS) return;
+    if (!gAudioReady) return;
+
+    if (key == GLFW_KEY_SPACE) {
+        if (ma_sound_is_playing(&gAudioSound)) ma_sound_stop(&gAudioSound);
+        else ma_sound_start(&gAudioSound);
+    }
+    else if (key == GLFW_KEY_R) {
+        ma_sound_seek_to_pcm_frame(&gAudioSound, 0);
+        ma_sound_start(&gAudioSound);
+    }
+    else if (key == GLFW_KEY_LEFT || key == GLFW_KEY_RIGHT) {
+        float t = 0.0f;
+        if (ma_sound_get_cursor_in_seconds(&gAudioSound, &t) == MA_SUCCESS) {
+            t += (key == GLFW_KEY_RIGHT ? +2.0f : -2.0f);
+            if (t < 0.0f) t = 0.0f;
+            ma_sound_seek_to_second(&gAudioSound, t);
+        }
+    }
+}
 
 // ====== 입력 콜백들 (네 코드 그대로) ======
 void ScrollCallback(GLFWwindow* window, double xoffset, double yoffset)
@@ -173,6 +223,23 @@ int main()
     std::unique_ptr<vmd::VmdMotion> motion(vmd::VmdMotion::LoadFromFile(vmdFiles[vmdSelected].c_str()));
     if (!motion) { std::wcerr << L"VMD 로딩 실패!\n"; return 1; }
 
+    // === 음악 파일 선택 ===
+    std::wstring musicFolder = L"C:/Users/Ha Yechan/Desktop/PMXViewer/musics"; // 또는 models / music 등
+    auto musicFiles = FindAllAudioFiles(musicFolder);
+    std::wstring musicPathW;
+    if (!musicFiles.empty()) {
+        std::wcerr << L"\n[ 음악 파일 목록 ]\n";
+        for (size_t i = 0; i < musicFiles.size(); ++i) std::wcerr << i << L": " << musicFiles[i] << L"\n";
+        std::wcerr << L"\n재생할 음악 번호(없으면 -1): ";
+        int msel = -1; std::cin >> msel;
+        if (msel >= 0 && msel < (int)musicFiles.size()) {
+            musicPathW = musicFiles[msel];
+        }
+    }
+    else {
+        std::wcerr << L"(음악 파일이 없습니다. 무음 재생)\n";
+    }
+
     // 3) GLFW/GLAD
     if (!glfwInit()) { std::wcerr << L"GLFW 초기화 실패!\n"; return -1; }
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
@@ -188,6 +255,7 @@ int main()
     glfwSetScrollCallback(window, ScrollCallback);
     glfwSetMouseButtonCallback(window, MouseButtonCallback);
     glfwSetCursorPosCallback(window, CursorPosCallback);
+    glfwSetKeyCallback(window, KeyCallback);
 
     if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) { std::wcerr << L"GLAD 초기화 실패!\n"; return -1; }
     std::wcerr << L"OpenGL 버전: " << glGetString(GL_VERSION) << std::endl;
@@ -209,6 +277,33 @@ int main()
 
     // 초기화 시 한 번만 실행
     SetupStaticSamplers(shader);
+
+    // === 오디오 초기화 ===
+    if (!musicPathW.empty()) {
+        if (ma_engine_init(NULL, &gAudioEngine) == MA_SUCCESS) {
+            // wide string → UTF-8 경로 변환
+            std::string musicPathUTF8;
+#ifdef _WIN32
+            int len = WideCharToMultiByte(CP_UTF8, 0, musicPathW.c_str(), -1, nullptr, 0, nullptr, nullptr);
+            musicPathUTF8.resize(len);
+            WideCharToMultiByte(CP_UTF8, 0, musicPathW.c_str(), -1, musicPathUTF8.data(), len, nullptr, nullptr);
+#else
+            // 다른 플랫폼이면 이미 UTF-8일 가능성 높음
+            musicPathUTF8.assign(musicPathW.begin(), musicPathW.end());
+#endif
+            if (ma_sound_init_from_file(&gAudioEngine, musicPathUTF8.c_str(), MA_SOUND_FLAG_STREAM, NULL, NULL, &gAudioSound) == MA_SUCCESS) {
+                gAudioReady = true;
+                ma_sound_start(&gAudioSound); // 재생 시작
+            }
+            else {
+                std::wcerr << L"음악 로드 실패. 무음 재생합니다.\n";
+                ma_engine_uninit(&gAudioEngine);
+            }
+        }
+        else {
+            std::wcerr << L"오디오 엔진 초기화 실패. 무음 재생합니다.\n";
+        }
+    }
 
     // 6) 루프
     while (!glfwWindowShouldClose(window)) {
@@ -246,9 +341,25 @@ int main()
         auto ms = [](double s, double e) { return (e - s) * 1000.0; };
 
         double t0 = glfwGetTime();
-        // 애니메이션 프레임 계산
-        float seconds = (float)glfwGetTime();
-        float frameTime = seconds * 30.0f;
+
+        // ========== 프레임 시간 계산: "오디오 시간"으로 동기화 ==========
+        float frameTime;
+        if (gAudioReady) {
+            float musicSec = 0.0f;
+            if (ma_sound_get_cursor_in_seconds(&gAudioSound, &musicSec) == MA_SUCCESS) {
+                // 음악 재생 시간을 기준으로 VMD 프레임 환산 (30fps)
+                frameTime = musicSec * 30.0f;
+            }
+            else {
+                // 실패하면 그냥 시간 흐름으로 대체
+                double seconds = glfwGetTime();
+                frameTime = static_cast<float>(seconds * 30.0f);
+            }
+        }
+        else {
+            double seconds = glfwGetTime();
+            frameTime = static_cast<float>(seconds * 30.0f);
+        }
 
         double t1 = glfwGetTime();
         actor.Update(frameTime); // CPU 스키닝 포함
@@ -275,8 +386,11 @@ int main()
     }
 
     // 정리
-    // PMXActor 소멸자에서 GL 리소스 정리한다면 아래는 생략 가능
-    // actor.~PMXActor(); (자동 호출)
+    // 정리
+    if (gAudioReady) {
+        ma_sound_uninit(&gAudioSound);
+        ma_engine_uninit(&gAudioEngine);
+    }
     glfwDestroyWindow(window);
     glfwTerminate();
     return 0;

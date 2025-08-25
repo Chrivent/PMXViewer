@@ -1,5 +1,6 @@
 #include "MorphManager.h"
 
+#include <glm/gtc/type_ptr.hpp>
 #include <algorithm>
 #include "Pmx.h"
 
@@ -55,113 +56,118 @@ float Morph::GetBaseAnimationWeight() const
 	return _saveAnimWeight;
 }
 
-void MorphManager::Init(const std::vector<pmx::PmxMorph>& pmxMorphs, const std::vector<vmd::VmdFaceFrame>& vmdMorphs, unsigned int vertexCount, unsigned int materialCount, unsigned int boneCount)
+void MorphManager::Init(const pmx::PmxMorph* pmxMorphs,
+	int pmxMorphCount,
+	const std::vector<vmd::VmdFaceFrame>& vmdMorphs,
+	unsigned int vertexCount,
+	unsigned int materialCount,
+	unsigned int boneCount)
 {
-	_morphs.resize(pmxMorphs.size());
+	// 컨테이너 클리어 & 용량 준비
+	_morphs.clear();
+	_morphByName.clear();
+	_morphs.resize(static_cast<size_t>(pmxMorphCount));
 
-	for (unsigned int index = 0; index < pmxMorphs.size(); index++)
+	for (int i = 0; i < pmxMorphCount; ++i)
 	{
-		Morph& currentMorph = _morphs[index];
-		const pmx::PmxMorph& currentPMXMorph = pmxMorphs[index];
-		currentMorph._name = currentPMXMorph.morph_name;
-		currentMorph._weight = 0.0f;
-		currentMorph._morphType = currentPMXMorph.morph_type;
+		Morph& cur = _morphs[static_cast<size_t>(i)];
+		const pmx::PmxMorph& src = pmxMorphs[i];
 
-		switch (currentMorph._morphType)
+		cur._name = src.morph_name;   // pmx::PmxMorph의 이름이 wide라면 그대로 복사
+		cur._weight = 0.0f;
+		cur._morphType = src.morph_type;
+
+		switch (cur._morphType)
 		{
 		case pmx::MorphType::Vertex:
 		{
-			std::vector<pmx::PmxMorphVertexOffset> offsets(
-				currentPMXMorph.vertex_offsets.get(),
-				currentPMXMorph.vertex_offsets.get() + currentPMXMorph.offset_count
-			);
-			currentMorph.SetPositionMorph(offsets);
+			std::vector<pmx::PmxMorphVertexOffset> v;
+			if (src.offset_count > 0 && src.vertex_offsets) {
+				v.assign(src.vertex_offsets.get(),
+					src.vertex_offsets.get() + src.offset_count);
+			}
+			cur.SetPositionMorph(std::move(v));
+			break;
 		}
-		break;
 		case pmx::MorphType::UV:
 		{
-			std::vector<pmx::PmxMorphUVOffset> uvOffsets(
-				currentPMXMorph.uv_offsets.get(),
-				currentPMXMorph.uv_offsets.get() + currentPMXMorph.offset_count
-			);
-			currentMorph.SetUVMorph(std::move(uvOffsets));
+			std::vector<pmx::PmxMorphUVOffset> v;
+			if (src.offset_count > 0 && src.uv_offsets) {
+				v.assign(src.uv_offsets.get(),
+					src.uv_offsets.get() + src.offset_count);
+			}
+			cur.SetUVMorph(std::move(v));
+			break;
 		}
-		break;
-
-		case pmx::MorphType::Material:
+		case pmx::MorphType::Material: // (enum 철자 확인: Material/Matrial 프로젝트 정의에 맞추기)
 		{
-			std::vector<pmx::PmxMorphMaterialOffset> materialOffsets(
-				currentPMXMorph.material_offsets.get(),
-				currentPMXMorph.material_offsets.get() + currentPMXMorph.offset_count
-			);
-			currentMorph.SetMaterialMorph(std::move(materialOffsets));
+			std::vector<pmx::PmxMorphMaterialOffset> v;
+			if (src.offset_count > 0 && src.material_offsets) {
+				v.assign(src.material_offsets.get(),
+					src.material_offsets.get() + src.offset_count);
+			}
+			cur.SetMaterialMorph(std::move(v));
+			break;
 		}
-		break;
-
 		case pmx::MorphType::Bone:
 		{
-			std::vector<pmx::PmxMorphBoneOffset> boneOffsets(
-				currentPMXMorph.bone_offsets.get(),
-				currentPMXMorph.bone_offsets.get() + currentPMXMorph.offset_count
-			);
-			currentMorph.SetBoneMorph(std::move(boneOffsets));
+			std::vector<pmx::PmxMorphBoneOffset> v;
+			if (src.offset_count > 0 && src.bone_offsets) {
+				v.assign(src.bone_offsets.get(),
+					src.bone_offsets.get() + src.offset_count);
+			}
+			cur.SetBoneMorph(std::move(v));
+			break;
 		}
-		break;
-
 		case pmx::MorphType::Group:
 		{
-			std::vector<pmx::PmxMorphGroupOffset> groupOffsets(
-				currentPMXMorph.group_offsets.get(),
-				currentPMXMorph.group_offsets.get() + currentPMXMorph.offset_count
-			);
-			currentMorph.SetGroupMorph(std::move(groupOffsets));
+			std::vector<pmx::PmxMorphGroupOffset> v;
+			if (src.offset_count > 0 && src.group_offsets) {
+				v.assign(src.group_offsets.get(),
+					src.group_offsets.get() + src.offset_count);
+			}
+			cur.SetGroupMorph(std::move(v));
+			break;
 		}
-		break;
+		default:
+			break;
 		}
 
-		_morphByName[currentMorph._name] = &currentMorph;
+		_morphByName[cur._name] = &cur;
 	}
 
-	_morphKeys.resize(vmdMorphs.size());
-	for (int i = 0; i < vmdMorphs.size(); i++)
+	// VMD 키 복사 및 이름 매핑
+	_morphKeys = vmdMorphs;
+	_morphKeyByName.clear();
+
+	for (auto& k : _morphKeys)
 	{
-		_morphKeys[i] = vmdMorphs[i];
+		std::wstring wname;
+		oguna::EncodingConverter{}.Cp932ToUtf16(
+			k.face_name.c_str(),
+			static_cast<int>(k.face_name.size()),
+			&wname);
 
-		std::wstring name;
-		oguna::EncodingConverter{}.Cp932ToUtf16(_morphKeys[i].face_name.c_str(), static_cast<int>(_morphKeys[i].face_name.size()), &name);
-		if (_morphByName.find(name) == _morphByName.end())
-		{
-			continue;
-		}
-
-		_morphKeyByName[name].push_back(&_morphKeys[i]);
+		auto it = _morphByName.find(wname);
+		if (it == _morphByName.end()) continue;
+		_morphKeyByName[wname].push_back(&k);
 	}
 
-	for (auto& morphKey : _morphKeyByName)
+	// 키프레임 정렬(프레임 오름차순)
+	for (auto& kv : _morphKeyByName)
 	{
-		std::vector<vmd::VmdFaceFrame*>& morphKeys = morphKey.second;
-
-		if (morphKeys.size() <= 1)
-		{
-			continue;
-		}
-
-		std::sort(morphKeys.begin(), morphKeys.end(),
-			[](const vmd::VmdFaceFrame* left, const vmd::VmdFaceFrame* right)
-			{
-				if (left->frame == right->frame)
-				{
-					return false;
-				}
-
-				return left->frame < right->frame;
-			});
+		auto& arr = kv.second;
+		if (arr.size() <= 1) continue;
+		std::sort(arr.begin(), arr.end(),
+			[](const vmd::VmdFaceFrame* a, const vmd::VmdFaceFrame* b)
+			{ return a->frame < b->frame; });
 	}
 
-	_morphVertexPosition.resize(vertexCount);
-	_morphUV.resize(vertexCount);
-	_morphMaterial.resize(materialCount);
-	_morphBone.resize(boneCount);
+	// 누적 버퍼 초기화(0으로)
+	_morphVertexPosition.assign(vertexCount, glm::vec3(0.0f));
+	_morphUV.assign(vertexCount, glm::vec4(0.0f));
+	_morphMaterial.assign(materialCount, MaterialMorphData{});
+	_morphBone.assign(boneCount, BoneMorphData{});
 }
 
 void MorphManager::Animate(float frame)
@@ -201,47 +207,57 @@ void MorphManager::Animate(float frame)
 	}
 }
 
+const glm::vec3& MorphManager::GetMorphVertexPosition(unsigned int index) const
+{
+	return _morphVertexPosition[index];
+}
+
+const glm::vec4& MorphManager::GetMorphUV(unsigned int index) const
+{
+	return _morphUV[index];
+}
+
+const MaterialMorphData& MorphManager::GetMorphMaterial(unsigned int index) const
+{
+	return _morphMaterial[index];
+}
+
+const BoneMorphData& MorphManager::GetMorphBone(unsigned int index) const
+{
+	return _morphBone[index];
+}
+
 void MorphManager::ResetMorphData()
 {
 	for (auto& pos : _morphVertexPosition)
 	{
-		pos.position_offset[0] = 0.f;
-		pos.position_offset[1] = 0.f;
-		pos.position_offset[2] = 0.f;
+		pos = glm::vec3(0.0f, 0.0f, 0.0f);
 	}
 
 	for (auto& uv : _morphUV)
 	{
-		uv.uv_offset[0] = 0.f;
-		uv.uv_offset[1] = 0.f;
-		uv.uv_offset[2] = 0.f;
-		uv.uv_offset[3] = 0.f;
+		uv = glm::vec4(0.0f, 0.0f, 0.0f, 0.0f);
 	}
 
 	for (auto& material : _morphMaterial)
 	{
-		material.offset_operation = 0;
-		for (int i = 0; i < 4; ++i) {
-			material.diffuse[i] = 0.f;
-			material.edge_color[i] = 0.f;
-			material.texture_argb[i] = 0.f;
-			material.sphere_texture_argb[i] = 0.f;
-			material.toon_texture_argb[i] = 0.f;
-		}
-		for (int i = 0; i < 3; ++i) {
-			material.specular[i] = 0.f;
-			material.ambient[i] = 0.f;
-		}
-		material.specularity = 0.f;
-		material.edge_size = 0.f;
+		material.weight = 0.0f;
+		material.diffuse = glm::vec4(0.0f, 0.0f, 0.0f, 0.0f);
+		material.specular = glm::vec3(0.0f, 0.0f, 0.0f);
+		material.specularPower = 0.0f;
+		material.ambient = glm::vec3(0.0f, 0.0f, 0.0f);
+		material.edgeColor = glm::vec4(0.0f, 0.0f, 0.0f, 0.0f);
+		material.edgeSize = 0.0f;
+		material.textureFactor = glm::vec4(0.0f, 0.0f, 0.0f, 0.0f);
+		material.sphereTextureFactor = glm::vec4(0.0f, 0.0f, 0.0f, 0.0f);
+		material.toonTextureFactor = glm::vec4(0.0f, 0.0f, 0.0f, 0.0f);
 	}
 
 	for (auto& bone : _morphBone)
 	{
-		for (int i = 0; i < 3; ++i)
-			bone.translation[i] = 0.f;
-		for (int i = 0; i < 4; ++i)
-			bone.rotation[i] = 0.f;
+		bone.weight = 0.0f;
+		bone.position = glm::vec3(0.0f, 0.0f, 0.0f);
+		bone.quaternion = glm::quat(0.0f, 0.0f, 0.0f, 0.0f);
 	}
 }
 
@@ -261,17 +277,17 @@ void MorphManager::AnimateMorph(Morph& morph, float weight)
 	break;
 	case pmx::MorphType::Material:
 	{
-		//AnimateMaterialMorph(morph, weight);
+		AnimateMaterialMorph(morph, weight);
 	}
 	break;
 	case pmx::MorphType::Bone:
 	{
-		//AnimateBoneMorph(morph, weight);
+		AnimateBoneMorph(morph, weight);
 	}
 	break;
 	case pmx::MorphType::Group:
 	{
-		//AnimateGroupMorph(morph, weight);
+		AnimateGroupMorph(morph, weight);
 	}
 	break;
 	}
@@ -279,28 +295,17 @@ void MorphManager::AnimateMorph(Morph& morph, float weight)
 
 void MorphManager::AnimatePositionMorph(Morph& morph, float weight)
 {
-	const auto& vertexPositionMorph = morph.GetPositionMorphData();
+	const auto& positionMorphs = morph.GetPositionMorphData();
 
-	for (const auto& data : vertexPositionMorph)
+	for (const auto& data : positionMorphs)
 	{
 		if (data.vertex_index >= _morphVertexPosition.size())
 			continue;
 
-		glm::vec3 originPosition(
-			_morphVertexPosition[data.vertex_index].position_offset[0],
-			_morphVertexPosition[data.vertex_index].position_offset[1],
-			_morphVertexPosition[data.vertex_index].position_offset[2]
-			);
-		glm::vec3 morphOffset(
-			data.position_offset[0],
-			data.position_offset[1],
-			data.position_offset[2]
-			);
-		glm::vec3 result = originPosition + morphOffset * morph._weight * weight;
+		glm::vec3 originPosition = _morphVertexPosition[data.vertex_index];
+		glm::vec3 morphPosition = glm::make_vec3(data.position_offset) * morph._weight * weight;
 
-		_morphVertexPosition[data.vertex_index].position_offset[0] = result.x;
-		_morphVertexPosition[data.vertex_index].position_offset[1] = result.y;
-		_morphVertexPosition[data.vertex_index].position_offset[2] = result.z;
+		_morphVertexPosition[data.vertex_index] = originPosition + morphPosition;
 	}
 }
 
@@ -313,33 +318,23 @@ void MorphManager::AnimateUVMorph(Morph& morph, float weight)
 		if (data.vertex_index >= _morphUV.size())
 			continue;
 
-		glm::vec4 morphUV(
-			data.uv_offset[0],
-			data.uv_offset[1],
-			data.uv_offset[2],
-			data.uv_offset[3]
-		);
-		glm::vec4 originUV(
-			_morphUV[data.vertex_index].uv_offset[0],
-			_morphUV[data.vertex_index].uv_offset[1],
-			_morphUV[data.vertex_index].uv_offset[2],
-			_morphUV[data.vertex_index].uv_offset[3]
-		);
+		glm::vec4 morphUV = glm::make_vec4(data.uv_offset);
+		glm::vec4 originUV = _morphUV[data.vertex_index];
 
-		originUV += morphUV * morph._weight * weight;
+		_morphUV[data.vertex_index] = originUV + morphUV * (morph._weight * weight);
 	}
 }
 
-/*void MorphManager::AnimateMaterialMorph(Morph& morph, float weight)
+void MorphManager::AnimateMaterialMorph(Morph& morph, float weight)
 {
 	const auto& materialMorph = morph.GetMaterialMorphData();
 
 	for (const auto& data : materialMorph)
 	{
-		if (data.material_index >= _morphMaterial.size())
+		if (static_cast<size_t>(data.material_index) >= _morphMaterial.size())
 			continue;
 
-		auto& cur = _morphMaterial[data.material_index];
+		MaterialMorphData& cur = _morphMaterial[data.material_index];
 		cur.weight = morph._weight * weight;
 		cur.opType = data.offset_operation;
 		cur.diffuse = glm::vec4(data.diffuse[0], data.diffuse[1], data.diffuse[2], data.diffuse[3]);
@@ -352,4 +347,35 @@ void MorphManager::AnimateUVMorph(Morph& morph, float weight)
 		cur.sphereTextureFactor = glm::vec4(data.sphere_texture_argb[0], data.sphere_texture_argb[1], data.sphere_texture_argb[2], data.sphere_texture_argb[3]);
 		cur.toonTextureFactor = glm::vec4(data.toon_texture_argb[0], data.toon_texture_argb[1], data.toon_texture_argb[2], data.toon_texture_argb[3]);
 	}
-}*/
+}
+
+void MorphManager::AnimateBoneMorph(Morph& morph, float weight)
+{
+	const auto& boneMorphs = morph.GetBoneMorphData();
+
+	for (const auto& data : boneMorphs)
+	{
+		_morphBone[data.bone_index].weight = morph._weight * weight;
+		_morphBone[data.bone_index].position = glm::vec3(data.translation[0], data.translation[1], data.translation[2]);
+		// PMX stores rotation as (x, y, z, w). glm::quat ctor is (w, x, y, z).
+		_morphBone[data.bone_index].quaternion = glm::quat(
+			data.rotation[3],  // w
+			data.rotation[0],  // x
+			data.rotation[1],  // y
+			data.rotation[2]   // z
+		);
+	}
+}
+
+void MorphManager::AnimateGroupMorph(Morph& morph, float weight)
+{
+	const auto& groupMorphs = morph.GetGroupMorphData();
+
+	for (const auto& data : groupMorphs)
+	{
+		if (static_cast<size_t>(data.morph_index) >= _morphs.size())
+			continue;
+
+		AnimateMorph(_morphs[data.morph_index], morph._weight * weight);
+	}
+}

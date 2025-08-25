@@ -43,25 +43,52 @@ private:
 	std::vector<pmx::PmxMorphGroupOffset> _groupMorphData;
 };
 
+struct MaterialMorphData
+{
+	float weight = 0.0f;
+	uint8_t opType = 0;
+	glm::vec4 diffuse{ 0.0f };
+	glm::vec3 specular{ 0.0f };
+	float     specularPower = 0.0f;
+	glm::vec3 ambient{ 0.0f };
+	glm::vec4 edgeColor{ 0.0f };
+	float     edgeSize = 0.0f;
+	glm::vec4 textureFactor{ 0.0f };
+	glm::vec4 sphereTextureFactor{ 0.0f };
+	glm::vec4 toonTextureFactor{ 0.0f };
+};
+
+struct BoneMorphData
+{
+	float     weight = 0.0f;
+	glm::vec3 position{ 0.0f };
+	glm::quat quaternion{ 1,0,0,0 };
+};
+
 class MorphManager
 {
 public:
-	void Init(const std::vector<pmx::PmxMorph>& pmxMorphs, const std::vector<vmd::VmdFaceFrame>& vmdMorphs, unsigned int vertexCount, unsigned int materialCount, unsigned int boneCount);
+	void Init(const pmx::PmxMorph* pmxMorphs,
+		int pmxMorphCount,
+		const std::vector<vmd::VmdFaceFrame>& vmdMorphs,
+		unsigned int vertexCount,
+		unsigned int materialCount,
+		unsigned int boneCount);
 
 	void Animate(float frame);
 
-	/*const pmx::PmxMorphVertexOffset& GetMorphVertexPosition(unsigned int index) const;
-	const pmx::PmxMorphUVOffset& GetMorphUV(unsigned int index) const;
-	const pmx::PmxMorphMaterialOffset& GetMorphMaterial(unsigned int index) const;
-	const pmx::PmxMorphBoneOffset& GetMorphBone(unsigned int index) const;*/
+	const glm::vec3& GetMorphVertexPosition(unsigned int index) const;
+	const glm::vec4& GetMorphUV(unsigned int index) const;
+	const MaterialMorphData& GetMorphMaterial(unsigned int index) const;
+	const BoneMorphData& GetMorphBone(unsigned int index) const;
 
 private:
 	void AnimateMorph(Morph& morph, float weight = 1.f);
 	void AnimatePositionMorph(Morph& morph, float weight);
 	void AnimateUVMorph(Morph& morph, float weight);
-	/*void AnimateMaterialMorph(Morph& morph, float weight);
+	void AnimateMaterialMorph(Morph& morph, float weight);
 	void AnimateBoneMorph(Morph& morph, float weight);
-	void AnimateGroupMorph(Morph& morph, float weight);*/
+	void AnimateGroupMorph(Morph& morph, float weight);
 
 	void ResetMorphData();
 
@@ -71,8 +98,8 @@ private:
 	std::vector<vmd::VmdFaceFrame> _morphKeys;
 	std::unordered_map<std::wstring, std::vector<vmd::VmdFaceFrame*>> _morphKeyByName;
 
-	std::vector<pmx::PmxMorphVertexOffset> _morphVertexPosition;
-	std::vector<pmx::PmxMorphUVOffset> _morphUV;
-	std::vector<pmx::PmxMorphMaterialOffset> _morphMaterial;
-	std::vector<pmx::PmxMorphBoneOffset> _morphBone;
+	std::vector<glm::vec3> _morphVertexPosition;
+	std::vector<glm::vec4> _morphUV;
+	std::vector<MaterialMorphData> _morphMaterial;
+	std::vector<BoneMorphData> _morphBone;
 };
