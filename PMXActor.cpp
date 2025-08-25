@@ -4,11 +4,9 @@
 #include <execution>
 #include <algorithm>
 
-#include <chrono>
-#include <iomanip>
-
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/quaternion.hpp>
+#include <glm/gtc/type_ptr.hpp>
 
 // ★ STB 구현은 '딱 한 곳'에서만: 여기서 구현하세요
 #define STB_IMAGE_IMPLEMENTATION
@@ -137,12 +135,13 @@ void PMXActor::Update(float frameTime30) {
 
     // 2) 본 팔레트 갱신
     buildBonePalette();
+    buildBonePaletteA34();
 
     // 3) CPU 스키닝 (표준 병렬 알고리즘 사용: 공용 스레드풀 활용)
-    std::for_each(std::execution::par, _ranges.begin(), _ranges.end(),
+    std::for_each(std::execution::par_unseq, _ranges.begin(), _ranges.end(),
         [this](const VertexRange& r) {
             if (!r.vertexCount) return;
-            skinningByRange(_model, _bonePalette, _vertices, r.startIndex, r.vertexCount);
+            skinningByRange(_model, _bonePaletteA34, _vertices, r.startIndex, r.vertexCount);
         });
 
     // 4) VBO 업데이트 (맵/언맵 + INVALIDATE + UNSYNC)
@@ -158,11 +157,40 @@ void PMXActor::Draw(GLuint shader) {
     const auto& U = getUniforms(shader);
     glBindVertexArray(_vao);
 
-    int indexOffset = 0;
+    struct Batch {
+        int matIndex;
+        int indexOffset;
+        int indexCount;
+        bool transparent;
+    };
+    std::vector<Batch> batches;
+    batches.reserve(_model.material_count);
 
+    // 1) 머테리얼 → 인덱스 오프셋/카운트/투명 플래그로 변환
+    int runningOffset = 0;
     for (int i = 0; i < _model.material_count; ++i) {
-        const auto& mat = _model.materials[i];
-        const int idxCount = mat.index_count;
+        const auto& m = _model.materials[i];
+        const bool isTransparent = (m.diffuse[3] < 0.999f);
+        batches.push_back(Batch{ i, runningOffset, m.index_count, isTransparent });
+        runningOffset += m.index_count;
+    }
+
+    // 2) 정렬: 불투명 먼저, 투명 나중 (내부 순서는 유지)
+    auto mid = std::stable_partition(batches.begin(), batches.end(),
+        [](const Batch& b) { return !b.transparent; });
+
+    // (원하면 투명 그룹 내부를 추가 정렬 가능:
+    // std::stable_sort(mid, batches.end(), [](const Batch& a, const Batch& b){
+    //     // 예: 알파값 오름차순/내림차순 등 (정확한 투명 처리엔 카메라-기반 깊이 정렬이 필요)
+    //     return aAlpha < bAlpha;
+    // });
+
+    // 텍스처 캐시 초기화
+    _lastTex0 = _lastTex1 = _lastTex2 = -1;
+
+    // 3) 드로우 루프 (상태 변경 없음: 정렬만 적용)
+    for (const auto& b : batches) {
+        const auto& mat = _model.materials[b.matIndex];
 
         const int texIndex = mat.diffuse_texture_index;
         const int toonIndex = mat.toon_texture_index;
@@ -173,7 +201,6 @@ void PMXActor::Draw(GLuint shader) {
         const bool useToon = (toonIndex >= 0 && toonIndex < (int)_textures.size() && _textures[toonIndex]);
         const bool useSphere = (sphereIndex >= 0 && sphereIndex < (int)_textures.size() && _textures[sphereIndex]);
 
-        // 바인딩 최소화 (상태 캐시)
         GLint want0 = hasDiffuse ? (GLint)_textures[texIndex] : 0;
         GLint want1 = useToon ? (GLint)_textures[toonIndex] : 0;
         GLint want2 = useSphere ? (GLint)_textures[sphereIndex] : 0;
@@ -192,9 +219,8 @@ void PMXActor::Draw(GLuint shader) {
         glUniform3fv(U.loc_ambient, 1, mat.ambient);
         glUniform1f(U.loc_Alpha, mat.diffuse[3]);
 
-        glDrawElements(GL_TRIANGLES, idxCount, GL_UNSIGNED_INT,
-            (void*)(uintptr_t)(indexOffset * sizeof(uint32_t)));
-        indexOffset += idxCount;
+        glDrawElements(GL_TRIANGLES, b.indexCount, GL_UNSIGNED_INT,
+            (void*)(uintptr_t)(b.indexOffset * sizeof(uint32_t)));
     }
 
     glBindVertexArray(0);
@@ -231,6 +257,41 @@ void PMXActor::buildSkinningPartitions(size_t vertexCount) {
     }
 }
 
+Affine34 PMXActor::toA34(const glm::mat4& M) {
+    Affine34 A;
+    const float* p = glm::value_ptr(M); // column-major
+    // row 0
+    A.m[0] = p[0];  A.m[1] = p[4];  A.m[2] = p[8];  A.m[3] = p[12];
+    // row 1
+    A.m[4] = p[1];  A.m[5] = p[5];  A.m[6] = p[9];  A.m[7] = p[13];
+    // row 2
+    A.m[8] = p[2];  A.m[9] = p[6];  A.m[10] = p[10]; A.m[11] = p[14];
+    return A;
+}
+
+glm::vec3 PMXActor::transformPoint(const Affine34& A, const glm::vec3& v) {
+    return {
+        A.m[0] * v.x + A.m[1] * v.y + A.m[2] * v.z + A.m[3],
+        A.m[4] * v.x + A.m[5] * v.y + A.m[6] * v.z + A.m[7],
+        A.m[8] * v.x + A.m[9] * v.y + A.m[10] * v.z + A.m[11]
+    };
+}
+
+glm::vec3 PMXActor::transformDir(const Affine34& A, const glm::vec3& v) {
+    return {
+        A.m[0] * v.x + A.m[1] * v.y + A.m[2] * v.z,
+        A.m[4] * v.x + A.m[5] * v.y + A.m[6] * v.z,
+        A.m[8] * v.x + A.m[9] * v.y + A.m[10] * v.z
+    };
+}
+
+glm::vec3 PMXActor::fastNormalize(const glm::vec3& v) {
+    float d = v.x * v.x + v.y * v.y + v.z * v.z;
+    if (d <= 0.f) return glm::vec3(0, 0, 1);
+    float inv = 1.0f / glm::sqrt(d); // /fp:fast or -ffast-math이면 더 빠름
+    return { v.x * inv, v.y * inv, v.z * inv };
+}
+
 void PMXActor::buildBonePalette() {
     _bonePalette.resize(_model.bone_count);
     for (int bi = 0; bi < _model.bone_count; ++bi) {
@@ -243,119 +304,180 @@ void PMXActor::buildBonePalette() {
     }
 }
 
+void PMXActor::buildBonePaletteA34()
+{
+    _bonePaletteA34.resize(_model.bone_count);
+    for (int bi = 0; bi < _model.bone_count; ++bi) {
+        const glm::mat4& M = (bi < (int)_bonePalette.size()) ? _bonePalette[bi] : glm::mat4(1.0f);
+        _bonePaletteA34[bi] = toA34(M);
+    }
+}
+
 void PMXActor::skinningByRange(
     const pmx::PmxModel& model,
-    const std::vector<glm::mat4>& bonePalette,
+    const std::vector<Affine34>& bonePaletteA34,
     std::vector<GLVertex>& out,
     unsigned start, unsigned count)
 {
     const unsigned end = std::min<unsigned>(start + count, (unsigned)model.vertex_count);
-    for (unsigned i = start; i < end; ++i) {
+    if (start >= end) return;
+
+    const Affine34* __restrict BP34 = bonePaletteA34.data();
+    const int bpSize = (int)bonePaletteA34.size();
+    GLVertex* __restrict outBase = out.data();
+
+    auto getA = [&](int idx) -> const Affine34& {
+        static const Affine34 I = toA34(glm::mat4(1.0f));
+        return (idx >= 0 && idx < bpSize) ? BP34[idx] : I;
+        };
+
+    // #pragma omp parallel for schedule(static)   // 병렬화 원하면 사용
+    for (int i = (int)start; i < (int)end; ++i)
+    {
         const auto& v = model.vertices[i];
-        glm::vec4 pos(v.position[0], v.position[1], v.position[2], 1.f);
-        glm::vec3 nrm(v.normal[0], v.normal[1], v.normal[2]);
+        const glm::vec3 pos(v.position[0], v.position[1], v.position[2]);
+        const glm::vec3 nrm(v.normal[0], v.normal[1], v.normal[2]);
 
-        glm::mat4 blended(0.0f);
-        bool useBlended = true;
+        GLVertex& dst = outBase[i];
+        dst.uv = { v.uv[0], v.uv[1] };
 
-        switch (v.skinning_type) {
-        case pmx::PmxVertexSkinningType::BDEF1: {
-            auto* b = static_cast<pmx::PmxVertexSkinningBDEF1*>(v.skinning.get());
-            blended = (b->bone_index >= 0 && b->bone_index < (int)bonePalette.size())
-                ? bonePalette[b->bone_index] : glm::mat4(1.0f);
+        switch (v.skinning_type)
+        {
+        case pmx::PmxVertexSkinningType::BDEF1:
+        {
+            const auto* b = static_cast<pmx::PmxVertexSkinningBDEF1*>(v.skinning.get());
+            const Affine34& A = getA(b->bone_index);
+            dst.position = transformPoint(A, pos);
+            dst.normal = fastNormalize(transformDir(A, nrm));
             break;
         }
-        case pmx::PmxVertexSkinningType::BDEF2: {
-            auto* b = static_cast<pmx::PmxVertexSkinningBDEF2*>(v.skinning.get());
-            float w0 = b->bone_weight, w1 = 1.f - w0;
-            glm::mat4 m0 = (b->bone_index1 >= 0 && b->bone_index1 < (int)bonePalette.size()) ? bonePalette[b->bone_index1] : glm::mat4(1);
-            glm::mat4 m1 = (b->bone_index2 >= 0 && b->bone_index2 < (int)bonePalette.size()) ? bonePalette[b->bone_index2] : glm::mat4(1);
-            blended = m0 * w0 + m1 * w1;
+        case pmx::PmxVertexSkinningType::BDEF2:
+        {
+            const auto* b = static_cast<pmx::PmxVertexSkinningBDEF2*>(v.skinning.get());
+            const float w0 = b->bone_weight, w1 = 1.0f - w0;
+
+            const Affine34& A0 = getA(b->bone_index1);
+            const Affine34& A1 = getA(b->bone_index2);
+
+            const glm::vec3 p0 = transformPoint(A0, pos);
+            const glm::vec3 p1 = transformPoint(A1, pos);
+            const glm::vec3 n0 = transformDir(A0, nrm);
+            const glm::vec3 n1 = transformDir(A1, nrm);
+
+            dst.position = p0 * w0 + p1 * w1;
+            dst.normal = fastNormalize(n0 * w0 + n1 * w1);
             break;
         }
-        case pmx::PmxVertexSkinningType::BDEF4: {
-            auto* b = static_cast<pmx::PmxVertexSkinningBDEF4*>(v.skinning.get());
-            const int id[4] = { b->bone_index1,b->bone_index2,b->bone_index3,b->bone_index4 };
-            const float w[4] = { b->bone_weight1,b->bone_weight2,b->bone_weight3,b->bone_weight4 };
-            blended = glm::mat4(0.0f);
+        case pmx::PmxVertexSkinningType::BDEF4:
+        {
+            const auto* b = static_cast<pmx::PmxVertexSkinningBDEF4*>(v.skinning.get());
+            const int   id[4] = { b->bone_index1, b->bone_index2, b->bone_index3, b->bone_index4 };
+            const float w[4] = { b->bone_weight1, b->bone_weight2, b->bone_weight3, b->bone_weight4 };
+
+            glm::vec3 pAcc(0.0f), nAcc(0.0f);
             for (int k = 0; k < 4; ++k) {
-                if (w[k] == 0.0f || id[k] < 0 || id[k] >= (int)bonePalette.size()) continue;
-                blended += bonePalette[id[k]] * w[k];
+                const float wk = w[k];
+                if (wk == 0.0f) continue;
+                const Affine34& Ak = getA(id[k]);
+                pAcc += transformPoint(Ak, pos) * wk;
+                nAcc += transformDir(Ak, nrm) * wk;
             }
+            dst.position = pAcc;
+            dst.normal = fastNormalize(nAcc);
             break;
         }
-        case pmx::PmxVertexSkinningType::SDEF: {
-            useBlended = false;
-            auto* s = static_cast<pmx::PmxVertexSkinningSDEF*>(v.skinning.get());
-            float w0 = s->bone_weight, w1 = 1.f - w0;
-            if (s->bone_index1 < 0 || s->bone_index2 < 0 ||
-                s->bone_index1 >= (int)bonePalette.size() || s->bone_index2 >= (int)bonePalette.size()) break;
-            glm::mat4 M0 = bonePalette[s->bone_index1];
-            glm::mat4 M1 = bonePalette[s->bone_index2];
-            glm::quat q0 = glm::quat_cast(M0), q1 = glm::quat_cast(M1);
-            glm::quat q = glm::slerp(q0, q1, w1);
-            glm::mat4 R = glm::toMat4(q);
-            glm::vec3 C(s->sdef_c[0], s->sdef_c[1], s->sdef_c[2]);
-            glm::vec3 R0(s->sdef_r0[0], s->sdef_r0[1], s->sdef_r0[2]);
-            glm::vec3 R1(s->sdef_r1[0], s->sdef_r1[1], s->sdef_r1[2]);
-            glm::vec3 rw = R0 * w0 + R1 * w1;
-            glm::vec3 r0 = C + R0 - rw;
-            glm::vec3 r1 = C + R1 - rw;
-            glm::vec3 cr0 = 0.5f * (C + r0);
-            glm::vec3 cr1 = 0.5f * (C + r1);
-            glm::vec3 pOut = glm::vec3(R * glm::vec4(glm::vec3(pos) - C, 1.0f))
+        case pmx::PmxVertexSkinningType::SDEF:
+        {
+            // SDEF은 정확 구현을 위해 회전 보간/중간점 계산이 필요하므로 기존 mat4 팔레트를 사용.
+            const auto* s = static_cast<pmx::PmxVertexSkinningSDEF*>(v.skinning.get());
+            const int i0 = s->bone_index1, i1 = s->bone_index2;
+            if (i0 < 0 || i1 < 0 || i0 >= (int)_bonePalette.size() || i1 >= (int)_bonePalette.size()) {
+                const Affine34& A = getA(i0);
+                dst.position = transformPoint(A, pos);
+                dst.normal = fastNormalize(transformDir(A, nrm));
+                break;
+            }
+
+            const float w0 = s->bone_weight, w1 = 1.0f - w0;
+            const glm::mat4& M0 = _bonePalette[i0];
+            const glm::mat4& M1 = _bonePalette[i1];
+
+            const glm::quat q0 = glm::quat_cast(M0);
+            const glm::quat q1 = glm::quat_cast(M1);
+            const glm::quat q = glm::slerp(q0, q1, w1);
+            const glm::mat4 R = glm::toMat4(q);
+
+            const glm::vec3 C(s->sdef_c[0], s->sdef_c[1], s->sdef_c[2]);
+            const glm::vec3 R0(s->sdef_r0[0], s->sdef_r0[1], s->sdef_r0[2]);
+            const glm::vec3 R1(s->sdef_r1[0], s->sdef_r1[1], s->sdef_r1[2]);
+
+            const glm::vec3 rw = R0 * w0 + R1 * w1;
+            const glm::vec3 r0 = C + R0 - rw;
+            const glm::vec3 r1 = C + R1 - rw;
+            const glm::vec3 cr0 = 0.5f * (C + r0);
+            const glm::vec3 cr1 = 0.5f * (C + r1);
+
+            const glm::vec3 pOut = glm::vec3(R * glm::vec4(pos - C, 1.0f))
                 + glm::vec3(M0 * glm::vec4(cr0, 1.0f)) * w0
                 + glm::vec3(M1 * glm::vec4(cr1, 1.0f)) * w1;
-            glm::vec3 nOut = glm::mat3(R) * nrm;
-            out[i].position = pOut;
-            out[i].normal = glm::normalize(nOut);
-            out[i].uv = { v.uv[0], v.uv[1] };
-            continue;
+
+            dst.position = pOut;
+            dst.normal = fastNormalize(glm::mat3(R) * nrm);
+            break;
         }
-        case pmx::PmxVertexSkinningType::QDEF: {
-            auto* qd = static_cast<pmx::PmxVertexSkinningQDEF*>(v.skinning.get());
-            const int ids[4] = { qd->bone_index1,qd->bone_index2,qd->bone_index3,qd->bone_index4 };
-            float w[4] = { qd->bone_weight1,qd->bone_weight2,qd->bone_weight3,qd->bone_weight4 };
-            float sum = w[0] + w[1] + w[2] + w[3]; if (sum > 0) { float inv = 1.f / sum; for (int k = 0; k < 4; ++k) w[k] *= inv; }
-            glm::quat accR(1, 0, 0, 0), accD(0, 0, 0, 0); bool has = false; glm::quat ref(1, 0, 0, 0);
+        case pmx::PmxVertexSkinningType::QDEF:
+        {
+            // QDEF도 회전/쌍대쿼터니언 누적 특성상 mat4/quat 필요 → 기존 팔레트 사용
+            const auto* qd = static_cast<pmx::PmxVertexSkinningQDEF*>(v.skinning.get());
+            int   ids[4] = { qd->bone_index1, qd->bone_index2, qd->bone_index3, qd->bone_index4 };
+            float w[4] = { qd->bone_weight1, qd->bone_weight2, qd->bone_weight3, qd->bone_weight4 };
+
+            float sum = w[0] + w[1] + w[2] + w[3];
+            if (sum > 0.0f) { float inv = 1.0f / sum; w[0] *= inv; w[1] *= inv; w[2] *= inv; w[3] *= inv; }
+
+            glm::quat accR(1, 0, 0, 0), accD(0, 0, 0, 0);
+            bool has = false; glm::quat ref(1, 0, 0, 0);
+
             for (int k = 0; k < 4; ++k) {
-                if (w[k] <= 0 || ids[k] < 0 || ids[k] >= (int)bonePalette.size()) continue;
-                glm::mat4 M = bonePalette[ids[k]];
+                if (w[k] <= 0.0f) continue;
+                const int id = ids[k];
+                if (id < 0 || id >= (int)_bonePalette.size()) continue;
+
+                const glm::mat4& M = _bonePalette[id];
                 glm::quat qr = glm::normalize(glm::quat_cast(M));
-                glm::vec3 t(M[3]);
+                const glm::vec3 t(M[3]);
                 glm::quat dq = 0.5f * (glm::quat(0, t.x, t.y, t.z) * qr);
+
                 if (!has) { ref = qr; has = true; }
                 else if (glm::dot(qr, ref) < 0) { qr = -qr; dq = -dq; }
-                accR += qr * w[k]; accD += dq * w[k];
+
+                accR += qr * w[k];
+                accD += dq * w[k];
             }
+
             float len = glm::length(accR);
             if (len < 1e-8f) {
-                int b0 = ids[0];
-                if (b0 >= 0 && b0 < (int)bonePalette.size()) {
-                    glm::mat4 M = bonePalette[b0];
-                    out[i].position = glm::vec3(M * pos);
-                    out[i].normal = glm::normalize(glm::mat3(M) * nrm);
-                    out[i].uv = { v.uv[0], v.uv[1] };
-                }
-                continue;
+                const glm::mat4& M = (ids[0] >= 0 && ids[0] < (int)_bonePalette.size()) ? _bonePalette[ids[0]] : glm::mat4(1.0f);
+                dst.position = glm::vec3(M * glm::vec4(pos, 1.0f));
+                dst.normal = fastNormalize(glm::mat3(M) * nrm);
+                break;
             }
+
             accR /= len; accD /= len;
             glm::quat tq = accD * glm::conjugate(accR) * 2.0f;
-            glm::vec3 tf(tq.x, tq.y, tq.z);
-            glm::mat4 R = glm::mat4_cast(accR); R[3] = glm::vec4(tf, 1.0f);
-            out[i].position = glm::vec3(R * pos);
-            out[i].normal = glm::normalize(glm::mat3_cast(accR) * nrm);
-            out[i].uv = { v.uv[0], v.uv[1] };
-            continue;
-        }
-        }
+            const glm::vec3 tf(tq.x, tq.y, tq.z);
 
-        if (useBlended) {
-            glm::vec3 pOut = glm::vec3(blended * pos);
-            glm::vec3 nOut = glm::normalize(glm::mat3(blended) * nrm);
-            out[i].position = pOut;
-            out[i].normal = nOut;
-            out[i].uv = { v.uv[0], v.uv[1] };
+            glm::mat4 R = glm::mat4_cast(accR);
+            R[3] = glm::vec4(tf, 1.0f);
+
+            dst.position = glm::vec3(R * glm::vec4(pos, 1.0f));
+            dst.normal = fastNormalize(glm::mat3_cast(accR) * nrm);
+            break;
+        }
+        default:
+            dst.position = pos;
+            dst.normal = fastNormalize(nrm);
+            break;
         }
     }
 }

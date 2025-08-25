@@ -21,6 +21,8 @@ struct VertexRange {
     unsigned vertexCount = 0;
 };
 
+struct Affine34 { float m[12]; };
+
 class PMXActor {
 public:
     PMXActor() = default;
@@ -43,13 +45,20 @@ private:
     void buildInitialVertices();
     // 파티션 구성 (스레드별 범위)
     void buildSkinningPartitions(size_t vertexCount);
+
+    static Affine34 toA34(const glm::mat4& M);
+    static glm::vec3 transformPoint(const Affine34& A, const glm::vec3& v);
+    static glm::vec3 transformDir(const Affine34& A, const glm::vec3& v);
+    static glm::vec3 fastNormalize(const glm::vec3& v);
+
     // 본 팔레트 구성
     void buildBonePalette();
+    void buildBonePaletteA34();
 
     // 스키닝 (범위별)
-    static void skinningByRange(
+    void skinningByRange(
         const pmx::PmxModel& model,
-        const std::vector<glm::mat4>& bonePalette,
+        const std::vector<Affine34>& bonePaletteA34,
         std::vector<GLVertex>& out,
         unsigned start, unsigned count);
 
@@ -69,6 +78,7 @@ private:
     std::vector<GLVertex>  _vertices;  // CPU-side skinned vertices
     std::vector<uint32_t>  _indices;
     std::vector<glm::mat4> _bonePalette;
+    std::vector<Affine34>   _bonePaletteA34;
 
     // GL 자원
     GLuint _vao = 0;
