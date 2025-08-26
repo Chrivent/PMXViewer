@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <execution>
 #include <algorithm>
+#include <chrono>
 
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/quaternion.hpp>
@@ -139,30 +140,121 @@ void PMXActor::SetModelScale(const glm::vec3& s) {
 
 void PMXActor::Update(float frameTime30) {
     if (!_glReady) return;
-    
-    // 1) 애니메이션 업데이트
-    _nodeManager.BeforeUpdateAnimation();
-    _morphManager.Animate(frameTime30);
-    _nodeManager.UpdateAnimation(frameTime30);
-    MorphMaterial();
-    MorphBone();
 
-    // 2) 본 팔레트 갱신
+    using clock = std::chrono::steady_clock;
+    using dsec = std::chrono::duration<double>;
+    auto t0 = clock::now();
+
+    // --- 1) 애니메이션/모프 업데이트 (분리 계측, 호출 순서 유지) ---
+    auto a_all_0 = clock::now();
+
+    // 1-1) 애니메이션 프리 (본 트리 준비)
+    auto a_pre_0 = clock::now();
+    _nodeManager.BeforeUpdateAnimation();
+    auto a_pre_1 = clock::now();
+
+    // 1-2) 모프: Animate (표정/UV 등)
+    auto mAnim0 = clock::now();
+    _morphManager.Animate(frameTime30);
+    auto mAnim1 = clock::now();
+
+    // 1-3) 애니메이션 본 업데이트
+    auto a_upd_0 = clock::now();
+    _nodeManager.UpdateAnimation(frameTime30);
+    auto a_upd_1 = clock::now();
+
+    // 1-4) 모프: Material
+    auto mMat0 = clock::now();
+    MorphMaterial();
+    auto mMat1 = clock::now();
+
+    // 1-5) 모프: Bone
+    auto mBone0 = clock::now();
+    MorphBone();
+    auto mBone1 = clock::now();
+
+    auto a_all_1 = clock::now();
+
+    // --- 2) 본 팔레트 갱신 ---
+    auto b0 = clock::now();
     buildBonePalette();
     buildBonePaletteA34();
+    auto b1 = clock::now();
 
-    // 3) CPU 스키닝 (표준 병렬 알고리즘 사용: 공용 스레드풀 활용)
+    // --- 3) CPU 스키닝 ---
+    auto s0 = clock::now();
     std::for_each(std::execution::par, _ranges.begin(), _ranges.end(),
         [this](const VertexRange& r) {
             if (!r.vertexCount) return;
             skinningByRange(_model, _bonePaletteA34, _vertices, r.startIndex, r.vertexCount);
         });
+    auto s1 = clock::now();
 
-    // 4) VBO 업데이트 (맵/언맵 + INVALIDATE + UNSYNC)
+    // --- 4) VBO 업데이트 ---
+    auto u0 = clock::now();
     uploadVertexBufferFast();
+    auto u1 = clock::now();
 
-    // 텍스처 바인딩 캐시 초기화
     _lastTex0 = _lastTex1 = _lastTex2 = -1;
+
+    auto t1 = clock::now();
+
+    // ================== 프로파일 누적 & 1초마다 출력 ==================
+    static double accAnimOnly = 0.0; // Before+UpdateAnimation (본만)
+    static double accMorphAnim = 0.0; // _morphManager.Animate
+    static double accMorphMat = 0.0; // MorphMaterial
+    static double accMorphBone = 0.0; // MorphBone
+    static double accAnimAll = 0.0; // 섹션1 전체(비교용)
+    static double accBone = 0.0; // 본 팔레트
+    static double accSkin = 0.0; // 스키닝
+    static double accUpload = 0.0; // 업로드
+    static double accTotal = 0.0; // 전체 프레임
+    static int    frames = 0;
+    static auto   lastPrint = clock::now();
+
+    // 분리 집계
+    const double dAnimOnly = std::chrono::duration_cast<dsec>((a_pre_1 - a_pre_0) + (a_upd_1 - a_upd_0)).count();
+    const double dMorphAnim = std::chrono::duration_cast<dsec>(mAnim1 - mAnim0).count();
+    const double dMorphMat = std::chrono::duration_cast<dsec>(mMat1 - mMat0).count();
+    const double dMorphBone = std::chrono::duration_cast<dsec>(mBone1 - mBone0).count();
+    const double dAnimAll = std::chrono::duration_cast<dsec>(a_all_1 - a_all_0).count();
+
+    accAnimOnly += dAnimOnly;
+    accMorphAnim += dMorphAnim;
+    accMorphMat += dMorphMat;
+    accMorphBone += dMorphBone;
+    accAnimAll += dAnimAll;
+    accBone += std::chrono::duration_cast<dsec>(b1 - b0).count();
+    accSkin += std::chrono::duration_cast<dsec>(s1 - s0).count();
+    accUpload += std::chrono::duration_cast<dsec>(u1 - u0).count();
+    accTotal += std::chrono::duration_cast<dsec>(t1 - t0).count();
+    frames += 1;
+
+    auto now = clock::now();
+    if (std::chrono::duration_cast<dsec>(now - lastPrint).count() >= 1.0) {
+        const double secs = std::chrono::duration_cast<dsec>(now - lastPrint).count();
+        const double fps = frames / secs;
+
+        auto avg_ms = [](double acc, int f) { return (acc / f) * 1000.0; };
+
+        std::wcerr << std::fixed << std::setprecision(2)
+            << L"[PMXActor] FPS: " << fps
+            << L" | avg ms  anim(bones):" << avg_ms(accAnimOnly, frames)
+            << L"  morph(anim):" << avg_ms(accMorphAnim, frames)
+            << L"  morph(material):" << avg_ms(accMorphMat, frames)
+            << L"  morph(bone):" << avg_ms(accMorphBone, frames)
+            << L"  anim+Morph:" << avg_ms(accAnimAll, frames)
+            << L"  bonePal:" << avg_ms(accBone, frames)
+            << L"  skin:" << avg_ms(accSkin, frames)
+            << L"  vbo:" << avg_ms(accUpload, frames)
+            << L"  total:" << avg_ms(accTotal, frames)
+            << L" (" << frames << L" frames / " << secs << L"s)\n";
+
+        accAnimOnly = accMorphAnim = accMorphMat = accMorphBone =
+            accAnimAll = accBone = accSkin = accUpload = accTotal = 0.0;
+        frames = 0;
+        lastPrint = now;
+    }
 }
 
 void PMXActor::Draw(GLuint shader) {

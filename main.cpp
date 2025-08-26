@@ -340,8 +340,6 @@ int main()
 
         auto ms = [](double s, double e) { return (e - s) * 1000.0; };
 
-        double t0 = glfwGetTime();
-
         // ========== 프레임 시간 계산: "오디오 시간"으로 동기화 ==========
         float frameTime;
         if (gAudioReady) {
@@ -361,28 +359,11 @@ int main()
             frameTime = static_cast<float>(seconds * 30.0f);
         }
 
-        double t1 = glfwGetTime();
-        actor.Update(frameTime); // CPU 스키닝 포함
-        double t2 = glfwGetTime();
-
+        actor.Update(frameTime);
         actor.Draw(shader.ID);
-        double t3 = glfwGetTime();
 
         glfwSwapBuffers(window);
         glfwPollEvents();
-        double t4 = glfwGetTime();
-
-        static double acc = 0; acc += (t4 - t0);
-        static int c = 0; c++;
-        if (acc >= 1.0) {
-            std::cout
-                << "FPS: " << c
-                << " | Update: " << ms(t1, t2) << " ms"
-                << " | Draw: " << ms(t2, t3) << " ms"
-                << " | Swap+Evt: " << ms(t3, t4) << " ms"
-                << std::endl;
-            acc -= 1.0; c = 0;
-        }
     }
 
     // 정리
