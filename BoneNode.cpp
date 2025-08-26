@@ -162,6 +162,14 @@ void BoneNode::UpdateAppendTransform()
     UpdateLocalTransform();
 }
 
+void BoneNode::UpdateChildTransform()
+{
+    for (BoneNode* child : _childrenNodes)
+    {
+        child->UpdateGlobalTransform();
+    }
+}
+
 void BoneNode::AnimateMotion(float frameNo) {
     _animateRotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
     _animatePosition = glm::vec3(0.0f);

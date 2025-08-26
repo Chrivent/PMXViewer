@@ -67,14 +67,7 @@ bool PMXActor::LoadModel(const std::wstring& pmxPath) {
 }
 
 bool PMXActor::LoadMotion(const std::wstring& vmdPath) {
-#ifdef _WIN32
-    // Vmd.h가 Windows에서 wide 경로를 받는 오버로드가 있다면 이게 정답
     _motion = vmd::VmdMotion::LoadFromFile(vmdPath.c_str());
-#else
-    // 리눅스/맥: UTF-8로 변환해 좁은 문자열 오버로드 호출
-    std::string u8 = std::filesystem::path(vmdPath).u8string();
-    _motion = vmd::VmdMotion::LoadFromFile(u8.c_str());
-#endif
     if (!_motion) return false;
 
     // VMD bone frames -> NodeManager

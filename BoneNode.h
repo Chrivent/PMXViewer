@@ -18,6 +18,7 @@ public:
     void UpdateLocalTransform();
     void UpdateGlobalTransform();
     void UpdateAppendTransform();
+    void UpdateChildTransform();
 
     void AnimateMotion(float frameNo);
     void AnimateIK(float frameNo);
