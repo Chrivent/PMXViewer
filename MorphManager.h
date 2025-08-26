@@ -7,6 +7,12 @@
 #include "Pmx.h"
 #include "Vmd.h"
 
+struct PosOffsetCached
+{
+	int idx;
+	glm::vec3 delta;
+};
+
 class Morph
 {
 public:
@@ -32,6 +38,7 @@ public:
 	std::wstring _name;
 	float _weight;
 	pmx::MorphType _morphType;
+	std::vector<PosOffsetCached> _posCached;
 
 private:
 	float _saveAnimWeight = 0.f;

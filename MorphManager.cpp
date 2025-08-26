@@ -2,6 +2,8 @@
 
 #include <glm/gtc/type_ptr.hpp>
 #include <algorithm>
+#include <chrono>
+#include <execution>
 #include "Pmx.h"
 
 Morph::Morph()
@@ -14,6 +16,13 @@ Morph::Morph()
 void Morph::SetPositionMorph(std::vector<pmx::PmxMorphVertexOffset> pmxPositionMorphs)
 {
 	_positionMorphData = std::move(pmxPositionMorphs);
+	_posCached.clear(); _posCached.reserve(_positionMorphData.size());
+	for (auto& x : _positionMorphData) {
+		_posCached.push_back({ x.vertex_index, glm::make_vec3(x.position_offset) });
+	}
+	// 2) 인덱스 정렬 (아래 참고)
+	std::sort(_posCached.begin(), _posCached.end(),
+		[](auto& a, auto& b) { return a.idx < b.idx; });
 }
 
 void Morph::SetUVMorph(std::vector<pmx::PmxMorphUVOffset> pmxUVMorphs)
@@ -172,38 +181,93 @@ void MorphManager::Init(const pmx::PmxMorph* pmxMorphs,
 
 void MorphManager::Animate(float frame)
 {
-	ResetMorphData();
+	using clock = std::chrono::steady_clock;
+	using dsec = std::chrono::duration<double>;
 
-	for (auto& morphKey : _morphKeyByName)
-	{
+	auto t0 = clock::now();
+
+	// ===== 시간 누적용 static 변수 =====
+	static double accReset = 0.0;  // ResetMorphData 시간 누적
+	static double accTotal = 0.0;
+	static double accPos = 0.0;
+	static double accUV = 0.0;
+	static double accMat = 0.0;
+	static double accBone = 0.0;
+	static double accGroup = 0.0;
+	static int    frames = 0;
+	static auto   lastPrint = clock::now();
+
+	// --- ResetMorphData 계측 ---
+	auto r0 = clock::now();
+	ResetMorphData();
+	auto r1 = clock::now();
+	accReset += std::chrono::duration_cast<dsec>(r1 - r0).count();
+
+	// --- 키 보간 ---
+	for (auto& morphKey : _morphKeyByName) {
 		auto morphIt = _morphByName.find(morphKey.first);
-		if (morphIt == _morphByName.end())
-		{
-			continue;
-		}
+		if (morphIt == _morphByName.end()) continue;
 
 		auto rit = std::find_if(morphKey.second.rbegin(), morphKey.second.rend(),
-			[frame](const vmd::VmdFaceFrame* morph)
-			{
+			[frame](const vmd::VmdFaceFrame* morph) {
 				return morph->frame <= frame;
 			});
 
 		auto iterator = rit.base();
 
-		if (iterator == morphKey.second.end())
-		{
+		if (iterator == morphKey.second.end()) {
 			morphIt->second->_weight = 0.0f;
 		}
-		else
-		{
-			float t = static_cast<float>(frame - (*rit)->frame) / static_cast<float>((*iterator)->frame - (*rit)->frame);
-			morphIt->second->_weight = std::lerp((*rit)->weight, (*iterator)->weight, t);
+		else {
+			float t = static_cast<float>(frame - (*rit)->frame) /
+				static_cast<float>((*iterator)->frame - (*rit)->frame);
+			morphIt->second->_weight =
+				std::lerp((*rit)->weight, (*iterator)->weight, t);
 		}
 	}
 
-	for (Morph& morph : _morphs)
-	{
+	// --- 모프 적용 ---
+	for (Morph& morph : _morphs) {
+		auto start = clock::now();
 		AnimateMorph(morph);
+		auto end = clock::now();
+
+		double dt = std::chrono::duration_cast<dsec>(end - start).count();
+		switch (morph._morphType) {
+		case pmx::MorphType::Vertex:   accPos += dt; break;
+		case pmx::MorphType::UV:       accUV += dt; break;
+		case pmx::MorphType::Material: accMat += dt; break;
+		case pmx::MorphType::Bone:     accBone += dt; break;
+		case pmx::MorphType::Group:    accGroup += dt; break;
+		default: break;
+		}
+	}
+
+	auto t1 = clock::now();
+	accTotal += std::chrono::duration_cast<dsec>(t1 - t0).count();
+	frames += 1;
+
+	// ===== 1초마다 출력 =====
+	auto now = clock::now();
+	if (std::chrono::duration_cast<dsec>(now - lastPrint).count() >= 1.0) {
+		const double secs = std::chrono::duration_cast<dsec>(now - lastPrint).count();
+		const double fps = frames / secs;
+		auto avg_ms = [&](double acc) { return (acc / frames) * 1000.0; };
+
+		std::wcerr << std::fixed << std::setprecision(2)
+			<< L"[MorphManager] FPS: " << fps
+			<< L" | avg ms  total:" << avg_ms(accTotal)
+			<< L"  reset:" << avg_ms(accReset)   // ★ 추가된 부분
+			<< L"  pos:" << avg_ms(accPos)
+			<< L"  uv:" << avg_ms(accUV)
+			<< L"  mat:" << avg_ms(accMat)
+			<< L"  bone:" << avg_ms(accBone)
+			<< L"  group:" << avg_ms(accGroup)
+			<< L" (" << frames << L" frames / " << secs << L"s)\n";
+
+		accReset = accTotal = accPos = accUV = accMat = accBone = accGroup = 0.0;
+		frames = 0;
+		lastPrint = now;
 	}
 }
 
@@ -229,36 +293,25 @@ const BoneMorphData& MorphManager::GetMorphBone(unsigned int index) const
 
 void MorphManager::ResetMorphData()
 {
-	for (auto& pos : _morphVertexPosition)
-	{
-		pos = glm::vec3(0.0f, 0.0f, 0.0f);
-	}
+	// pos
+	std::for_each(std::execution::par_unseq,
+		_morphVertexPosition.begin(), _morphVertexPosition.end(),
+		[](glm::vec3& v) { v = glm::vec3(0); });
 
-	for (auto& uv : _morphUV)
-	{
-		uv = glm::vec4(0.0f, 0.0f, 0.0f, 0.0f);
-	}
+	// uv
+	std::for_each(std::execution::par_unseq,
+		_morphUV.begin(), _morphUV.end(),
+		[](glm::vec4& v) { v = glm::vec4(0); });
 
-	for (auto& material : _morphMaterial)
-	{
-		material.weight = 0.0f;
-		material.diffuse = glm::vec4(0.0f, 0.0f, 0.0f, 0.0f);
-		material.specular = glm::vec3(0.0f, 0.0f, 0.0f);
-		material.specularPower = 0.0f;
-		material.ambient = glm::vec3(0.0f, 0.0f, 0.0f);
-		material.edgeColor = glm::vec4(0.0f, 0.0f, 0.0f, 0.0f);
-		material.edgeSize = 0.0f;
-		material.textureFactor = glm::vec4(0.0f, 0.0f, 0.0f, 0.0f);
-		material.sphereTextureFactor = glm::vec4(0.0f, 0.0f, 0.0f, 0.0f);
-		material.toonTextureFactor = glm::vec4(0.0f, 0.0f, 0.0f, 0.0f);
-	}
+	// material
+	std::for_each(std::execution::par_unseq,
+		_morphMaterial.begin(), _morphMaterial.end(),
+		[](MaterialMorphData& m) { m = MaterialMorphData{}; });
 
-	for (auto& bone : _morphBone)
-	{
-		bone.weight = 0.0f;
-		bone.position = glm::vec3(0.0f, 0.0f, 0.0f);
-		bone.quaternion = glm::quat(0.0f, 0.0f, 0.0f, 0.0f);
-	}
+	// bone
+	std::for_each(std::execution::par_unseq,
+		_morphBone.begin(), _morphBone.end(),
+		[](BoneMorphData& b) { b = BoneMorphData{}; });
 }
 
 void MorphManager::AnimateMorph(Morph& morph, float weight)
@@ -295,18 +348,19 @@ void MorphManager::AnimateMorph(Morph& morph, float weight)
 
 void MorphManager::AnimatePositionMorph(Morph& morph, float weight)
 {
-	const auto& positionMorphs = morph.GetPositionMorphData();
+	const auto& A = morph._posCached;
+	if (A.empty()) return;
 
-	for (const auto& data : positionMorphs)
-	{
-		if (data.vertex_index >= _morphVertexPosition.size())
-			continue;
+	const float w = morph._weight * weight;
+	glm::vec3* __restrict out = _morphVertexPosition.data();
+	const size_t N = _morphVertexPosition.size();
 
-		glm::vec3 originPosition = _morphVertexPosition[data.vertex_index];
-		glm::vec3 morphPosition = glm::make_vec3(data.position_offset) * morph._weight * weight;
-
-		_morphVertexPosition[data.vertex_index] = originPosition + morphPosition;
-	}
+	std::for_each(std::execution::par_unseq, A.begin(), A.end(),
+		[&](const PosOffsetCached& d) {
+			const uint32_t idx = d.idx;
+			if (idx >= N) return;
+			out[idx] += d.delta * w;
+		});
 }
 
 void MorphManager::AnimateUVMorph(Morph& morph, float weight)

@@ -10,6 +10,7 @@ class NodeManager
 {
 public:
     void Init(std::unique_ptr<pmx::PmxBone[]>& bones, size_t boneCount);
+    void BuildLevels();
     void SortKey();
 
     BoneNode* GetBoneNodeByIndex(int index) const;
@@ -27,4 +28,6 @@ public:
     unsigned int _duration = 0;
 
     std::vector<IKSolver*> _ikSolvers;
+
+    std::vector<std::vector<BoneNode*>> _levels;
 };

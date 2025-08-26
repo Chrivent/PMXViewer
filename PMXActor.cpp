@@ -200,46 +200,57 @@ void PMXActor::Update(float frameTime30) {
     auto t1 = clock::now();
 
     // ================== 프로파일 누적 & 1초마다 출력 ==================
-    static double accAnimOnly = 0.0; // Before+UpdateAnimation (본만)
-    static double accMorphAnim = 0.0; // _morphManager.Animate
-    static double accMorphMat = 0.0; // MorphMaterial
-    static double accMorphBone = 0.0; // MorphBone
-    static double accAnimAll = 0.0; // 섹션1 전체(비교용)
-    static double accBone = 0.0; // 본 팔레트
-    static double accSkin = 0.0; // 스키닝
-    static double accUpload = 0.0; // 업로드
-    static double accTotal = 0.0; // 전체 프레임
+    static double accAnimPre = 0.0; // ★ BeforeUpdateAnimation
+    static double accAnimUpd = 0.0; // ★ UpdateAnimation
+    static double accAnimOnly = 0.0; // Before+Update 합계(기존)
+    static double accMorphAnim = 0.0;
+    static double accMorphMat = 0.0;
+    static double accMorphBone = 0.0;
+    static double accAnimAll = 0.0;
+    static double accBone = 0.0;
+    static double accSkin = 0.0;
+    static double accUpload = 0.0;
+    static double accTotal = 0.0;
     static int    frames = 0;
     static auto   lastPrint = clock::now();
 
     // 분리 집계
-    const double dAnimOnly = std::chrono::duration_cast<dsec>((a_pre_1 - a_pre_0) + (a_upd_1 - a_upd_0)).count();
+    const double dAnimPre = std::chrono::duration_cast<dsec>(a_pre_1 - a_pre_0).count();
+    const double dAnimUpd = std::chrono::duration_cast<dsec>(a_upd_1 - a_upd_0).count();
+    const double dAnimOnly = dAnimPre + dAnimUpd; // 합계(기존 지표)
     const double dMorphAnim = std::chrono::duration_cast<dsec>(mAnim1 - mAnim0).count();
     const double dMorphMat = std::chrono::duration_cast<dsec>(mMat1 - mMat0).count();
     const double dMorphBone = std::chrono::duration_cast<dsec>(mBone1 - mBone0).count();
     const double dAnimAll = std::chrono::duration_cast<dsec>(a_all_1 - a_all_0).count();
+    const double dBonePal = std::chrono::duration_cast<dsec>(b1 - b0).count();
+    const double dSkin = std::chrono::duration_cast<dsec>(s1 - s0).count();
+    const double dUpload = std::chrono::duration_cast<dsec>(u1 - u0).count();
+    const double dTotal = std::chrono::duration_cast<dsec>(t1 - t0).count();
 
+    accAnimPre += dAnimPre;
+    accAnimUpd += dAnimUpd;
     accAnimOnly += dAnimOnly;
     accMorphAnim += dMorphAnim;
     accMorphMat += dMorphMat;
     accMorphBone += dMorphBone;
     accAnimAll += dAnimAll;
-    accBone += std::chrono::duration_cast<dsec>(b1 - b0).count();
-    accSkin += std::chrono::duration_cast<dsec>(s1 - s0).count();
-    accUpload += std::chrono::duration_cast<dsec>(u1 - u0).count();
-    accTotal += std::chrono::duration_cast<dsec>(t1 - t0).count();
+    accBone += dBonePal;
+    accSkin += dSkin;
+    accUpload += dUpload;
+    accTotal += dTotal;
     frames += 1;
 
     auto now = clock::now();
     if (std::chrono::duration_cast<dsec>(now - lastPrint).count() >= 1.0) {
         const double secs = std::chrono::duration_cast<dsec>(now - lastPrint).count();
         const double fps = frames / secs;
-
         auto avg_ms = [](double acc, int f) { return (acc / f) * 1000.0; };
 
         std::wcerr << std::fixed << std::setprecision(2)
             << L"[PMXActor] FPS: " << fps
-            << L" | avg ms  anim(bones):" << avg_ms(accAnimOnly, frames)
+            << L" | avg ms  anim(pre):" << avg_ms(accAnimPre, frames)   // ★ 추가
+            << L"  anim(update):" << avg_ms(accAnimUpd, frames)   // ★ 추가
+            << L"  anim(bones):" << avg_ms(accAnimOnly, frames)   // 합계(기존)
             << L"  morph(anim):" << avg_ms(accMorphAnim, frames)
             << L"  morph(material):" << avg_ms(accMorphMat, frames)
             << L"  morph(bone):" << avg_ms(accMorphBone, frames)
@@ -250,7 +261,8 @@ void PMXActor::Update(float frameTime30) {
             << L"  total:" << avg_ms(accTotal, frames)
             << L" (" << frames << L" frames / " << secs << L"s)\n";
 
-        accAnimOnly = accMorphAnim = accMorphMat = accMorphBone =
+        accAnimPre = accAnimUpd = accAnimOnly =
+            accMorphAnim = accMorphMat = accMorphBone =
             accAnimAll = accBone = accSkin = accUpload = accTotal = 0.0;
         frames = 0;
         lastPrint = now;

@@ -1,6 +1,7 @@
 #include "NodeManager.h"
 
 #include <algorithm>
+#include <execution>
 #include "BoneNode.h"
 #include "IKSolver.h"
 
@@ -121,6 +122,20 @@ void NodeManager::Init(std::unique_ptr<pmx::PmxBone[]>& bones, size_t boneCount)
         {
             return left->_deformDepth < right->_deformDepth;
         });
+
+    BuildLevels();
+}
+
+void NodeManager::BuildLevels() {
+    _levels.clear();
+    std::queue<std::pair<BoneNode*, int>> q;
+    for (auto* n : _boneNodeByIdx) if (!n->_parentBoneNode) q.emplace(n, 0);
+    while (!q.empty()) {
+        auto [n, d] = q.front(); q.pop();
+        if ((int)_levels.size() <= d) _levels.resize(d + 1);
+        _levels[d].push_back(n);
+        for (auto* c : n->_childrenNodes) q.emplace(c, d + 1);
+    }
 }
 
 void NodeManager::SortKey() {
@@ -155,32 +170,34 @@ void NodeManager::BeforeUpdateAnimation()
 }
 
 void NodeManager::UpdateAnimation(float frameNo) {
-    for (BoneNode* curNode : _boneNodeByIdx)
-    {
-        curNode->AnimateMotion(frameNo);
-        curNode->AnimateIK(frameNo);
-        curNode->UpdateLocalTransform();
-    }
+    std::for_each(std::execution::par, _boneNodeByIdx.begin(), _boneNodeByIdx.end(),
+        [&](BoneNode* n) {
+            n->AnimateMotion(frameNo);
+            n->AnimateIK(frameNo);
+            n->UpdateLocalTransform();
+        });
 
     if (_boneNodeByIdx.size() > 0)
     {
         _boneNodeByIdx[0]->UpdateGlobalTransform();
     }
 
-    for (BoneNode* curNode : _sortedNodes)
-    {
-        if (curNode->_appendBoneNode != nullptr)
-        {
-            curNode->UpdateAppendTransform();
-            curNode->UpdateGlobalTransform();
-        }
+    for (auto& lvl : _levels) {
+        std::for_each(std::execution::par_unseq, lvl.begin(), lvl.end(),
+            [&](BoneNode* n) {
+                if (n->_appendBoneNode != nullptr)
+                {
+                    n->UpdateAppendTransform();
+                    n->UpdateGlobalTransform();
+                }
 
-        IKSolver* curSolver = curNode->_ikSolver;
-        if (curSolver != nullptr)
-        {
-            curSolver->Solve();
-            curNode->UpdateGlobalTransform();
-        }
+                IKSolver* curSolver = n->_ikSolver;
+                if (curSolver != nullptr)
+                {
+                    curSolver->Solve();
+                    n->UpdateGlobalTransform();
+                }
+            });
     }
 }
 
