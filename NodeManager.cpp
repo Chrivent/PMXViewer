@@ -172,40 +172,91 @@ void NodeManager::BeforeUpdateAnimation()
     }
 }
 
-void NodeManager::UpdateAnimation(float frameNo) {
+void NodeManager::EvaluateAnimation(float frameNo)
+{
     std::for_each(std::execution::par, _boneNodeByIdx.begin(), _boneNodeByIdx.end(),
         [&](BoneNode* n) {
             n->AnimateMotion(frameNo);
             n->AnimateIK(frameNo);
-            n->UpdateLocalTransform();
+        });
+}
+
+void NodeManager::UpdateAnimation() {
+    std::for_each(std::execution::par, _boneNodeByIdx.begin(), _boneNodeByIdx.end(),
+        [&](BoneNode* n) {
+            if (n->_deformAfterPhysics != true)
+            {
+                n->UpdateLocalTransform();
+            }
         });
 
     if (_boneNodeByIdx.size() > 0)
     {
-        _boneNodeByIdx[0]->UpdateGlobalTransform();
+        if (_boneNodeByIdx[0]->_deformAfterPhysics != true)
+        {
+            _boneNodeByIdx[0]->UpdateGlobalTransform();
+        }
     }
 
     for (auto& lvl : _levels) {
         std::for_each(std::execution::par, lvl.begin(), lvl.end(),
             [&](BoneNode* n) {
-                if (n->_appendBoneNode != nullptr)
+                if (n->_deformAfterPhysics != true)
                 {
-                    n->UpdateAppendTransform();
-                    n->UpdateGlobalTransform();
-                }
+                    if (n->_appendBoneNode != nullptr)
+                    {
+                        n->UpdateAppendTransform();
+                        n->UpdateGlobalTransform();
+                    }
 
-                IKSolver* curSolver = n->_ikSolver;
-                if (curSolver != nullptr)
-                {
-                    curSolver->Solve();
-                    n->UpdateGlobalTransform();
+                    IKSolver* curSolver = n->_ikSolver;
+                    if (curSolver != nullptr)
+                    {
+                        curSolver->Solve();
+                        n->UpdateGlobalTransform();
+                    }
                 }
             });
     }
 }
 
-void NodeManager::UpdateAnimationAfterPhysics(float frameNo) {
-    
+void NodeManager::UpdateAnimationAfterPhysics() {
+    std::for_each(std::execution::par, _boneNodeByIdx.begin(), _boneNodeByIdx.end(),
+        [&](BoneNode* n) {
+            if (n->_deformAfterPhysics != false)
+            {
+                n->UpdateLocalTransform();
+            }
+        });
+
+    if (_boneNodeByIdx.size() > 0)
+    {
+        if (_boneNodeByIdx[0]->_deformAfterPhysics != false)
+        {
+            _boneNodeByIdx[0]->UpdateGlobalTransform();
+        }
+    }
+
+    for (auto& lvl : _levels) {
+        std::for_each(std::execution::par, lvl.begin(), lvl.end(),
+            [&](BoneNode* n) {
+                if (n->_deformAfterPhysics != false)
+                {
+                    if (n->_appendBoneNode != nullptr)
+                    {
+                        n->UpdateAppendTransform();
+                        n->UpdateGlobalTransform();
+                    }
+
+                    IKSolver* curSolver = n->_ikSolver;
+                    if (curSolver != nullptr)
+                    {
+                        curSolver->Solve();
+                        n->UpdateGlobalTransform();
+                    }
+                }
+            });
+    }
 }
 
 void NodeManager::Dispose() {

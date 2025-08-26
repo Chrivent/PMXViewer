@@ -17,8 +17,9 @@ public:
     BoneNode* GetBoneNodeByName(std::wstring& name) const;
 
     void BeforeUpdateAnimation();
-    void UpdateAnimation(float frameNo);
-    void UpdateAnimationAfterPhysics(float frameNo);
+    void EvaluateAnimation(float frameNo);
+    void UpdateAnimation();
+    void UpdateAnimationAfterPhysics();
 
     void Dispose();
 

@@ -51,7 +51,7 @@ public:
 
     void InitPhysics();
     void ResetPhysics();
-    void UpdatePhysicsAnimation(DWORD elapse);
+    void UpdatePhysicsAnimation();
 
     // GL 초기화/드로우
     bool InitGL();

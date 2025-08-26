@@ -210,14 +210,12 @@ void PMXActor::ResetPhysics()
     }
 }
 
-void PMXActor::UpdatePhysicsAnimation(DWORD elapse)
+void PMXActor::UpdatePhysicsAnimation()
 {
     for (auto& rigidBody : _rigidBodies)
     {
         rigidBody->SetActive(true);
     }
-
-    //_physicsManager.Update(elapse);
 
     for (auto& rigidBody : _rigidBodies)
     {
@@ -298,7 +296,10 @@ void PMXActor::Update(float frameTime30) {
 
     // 1-3) 애니메이션 본 업데이트
     auto a_upd_0 = clock::now();
-    _nodeManager.UpdateAnimation(frameTime30);
+    _nodeManager.EvaluateAnimation(frameTime30);
+    _nodeManager.UpdateAnimation();
+    UpdatePhysicsAnimation();
+    _nodeManager.UpdateAnimationAfterPhysics();
     auto a_upd_1 = clock::now();
 
     // 1-4) 모프: Material
