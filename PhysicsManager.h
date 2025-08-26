@@ -17,7 +17,6 @@ public:
 	static void Destroy();
 
 	static void ActivePhysics(bool active);
-	static void ForceUpdatePhysics();
 
 	static void AddRigidBody(RigidBody* rigidBody);
 	static void RemoveRigidBody(RigidBody* rigidBody);
@@ -42,8 +41,7 @@ public:
 	static int _maxSubStepCount;
 
 	static std::thread _physicsUpdateThread;
-	static bool _threadFlag;
+	static std::atomic<bool> _threadFlag;
 
 	static std::atomic<bool> _stopFlag;
-	static std::atomic<bool> _endFlag;
 };

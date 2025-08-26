@@ -29,6 +29,9 @@ void NodeManager::Init(std::unique_ptr<pmx::PmxBone[]>& bones, size_t boneCount)
 
         const pmx::PmxBone& currentPmxBone = bones[index];
 
+        bool deformAfterPhysics = (currentPmxBone.bone_flag & 0x1000) != 0;
+        currentBoneNode->_deformAfterPhysics = deformAfterPhysics;
+
         bool appendRotate = currentPmxBone.bone_flag & 0x0100;
         bool appendTranslate = currentPmxBone.bone_flag & 0x0200;
         currentBoneNode->_isAppendRotate = appendRotate;
@@ -199,6 +202,10 @@ void NodeManager::UpdateAnimation(float frameNo) {
                 }
             });
     }
+}
+
+void NodeManager::UpdateAnimationAfterPhysics(float frameNo) {
+    
 }
 
 void NodeManager::Dispose() {

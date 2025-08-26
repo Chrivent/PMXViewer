@@ -8,6 +8,9 @@
 #include "Vmd.h"
 #include "NodeManager.h"
 #include "MorphManager.h"
+#include "RigidBody.h"
+#include "Joint.h"
+#include "MotionState.h"
 
 // 정점 포맷
 struct GLVertex {
@@ -45,6 +48,10 @@ public:
     // 로드
     bool LoadModel(const std::wstring& pmxPath);
     bool LoadMotion(const std::wstring& vmdPath);
+
+    void InitPhysics();
+    void ResetPhysics();
+    void UpdatePhysicsAnimation(DWORD elapse);
 
     // GL 초기화/드로우
     bool InitGL();
@@ -117,4 +124,7 @@ private:
     GLint _lastTex0 = -1, _lastTex1 = -1, _lastTex2 = -1;
 
     std::vector<EffectiveMaterial> _matCache;
+
+    std::vector<std::unique_ptr<RigidBody>> _rigidBodies;
+    std::vector<std::unique_ptr<Joint>> _joints;
 };

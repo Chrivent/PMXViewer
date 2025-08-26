@@ -14,6 +14,7 @@
 #include "stb_image.h"
 
 #include "BoneNode.h"
+#include "PhysicsManager.h"
 
 struct MaterialUniforms {
     GLint loc_bUseToon, loc_bUseSphere, loc_sphereMode;
@@ -43,6 +44,8 @@ PMXActor::~PMXActor() {
     if (_vbo) glDeleteBuffers(1, &_vbo);
     if (_vao) glDeleteVertexArrays(1, &_vao);
     for (auto t : _textures) if (t) glDeleteTextures(1, &t);
+
+    PhysicsManager::Destroy();
 }
 
 bool PMXActor::LoadModel(const std::wstring& pmxPath) {
@@ -91,7 +94,149 @@ bool PMXActor::LoadMotion(const std::wstring& vmdPath) {
         static_cast<unsigned>(_model.bone_count)
     );
 
+    PhysicsManager::Create();
+    InitPhysics();
+    ResetPhysics();
+
     return true;
+}
+
+void PMXActor::InitPhysics()
+{
+    PhysicsManager::ActivePhysics(false);
+
+    if (_model.rigid_body_count > 0 && _model.rigid_bodies) {
+        for (int i = 0; i < _model.rigid_body_count; ++i) {
+            const pmx::PmxRigidBody& pmxRigidBody = _model.rigid_bodies[i];
+
+            RigidBody* rigidBody = new RigidBody();
+            _rigidBodies.emplace_back(std::move(rigidBody));
+
+            BoneNode* boneNode = nullptr;
+            if (pmxRigidBody.target_bone != -1)
+            {
+                boneNode = _nodeManager.GetBoneNodeByIndex(pmxRigidBody.target_bone);
+            }
+
+            if (rigidBody->Init(pmxRigidBody, &_nodeManager, boneNode) == false)
+            {
+                OutputDebugStringA("Create Rigid Body Fail");
+                continue;
+            }
+            PhysicsManager::AddRigidBody(rigidBody);
+        }
+    }
+
+    if (_model.joint_count > 0 && _model.joints) {
+        for (int i = 0; i < _model.joint_count; ++i) {
+            const pmx::PmxJoint& pmxJoint = _model.joints[i];
+
+            if (pmxJoint.param.rigid_body1 != -1 &&
+                pmxJoint.param.rigid_body2 != -1 &&
+                pmxJoint.param.rigid_body1 != pmxJoint.param.rigid_body2)
+            {
+                Joint* joint = new Joint();
+                _joints.emplace_back(std::move(joint));
+
+                RigidBody* rigidBodyA = nullptr;
+                if (_rigidBodies.size() <= pmxJoint.param.rigid_body1)
+                {
+                    OutputDebugStringA("Create Joint Fail");
+                    continue;
+                }
+
+                rigidBodyA = _rigidBodies[pmxJoint.param.rigid_body1].get();
+
+                RigidBody* rigidBodyB = nullptr;
+                if (_rigidBodies.size() <= pmxJoint.param.rigid_body2)
+                {
+                    OutputDebugStringA("Create Joint Fail");
+                    continue;
+                }
+
+                rigidBodyB = _rigidBodies[pmxJoint.param.rigid_body2].get();
+
+                if (rigidBodyA->_rigidBody->isStaticOrKinematicObject() == true &&
+                    rigidBodyB->_rigidBody->isStaticOrKinematicObject() == true)
+                {
+                    int d = 0;
+                }
+
+                if (joint->CreateJoint(pmxJoint, rigidBodyA, rigidBodyB) == false)
+                {
+                    OutputDebugStringA("Create Joint Fail");
+                    continue;
+                }
+
+                PhysicsManager::AddJoint(joint);
+            }
+        }
+    }
+
+    PhysicsManager::ActivePhysics(true);
+}
+
+void PMXActor::ResetPhysics()
+{
+    for (auto& rigidBody : _rigidBodies)
+    {
+        rigidBody->SetActive(false);
+        rigidBody->ResetTransform();
+    }
+
+    for (auto& rigidBody : _rigidBodies)
+    {
+        rigidBody->ReflectGlobalTransform();
+    }
+
+    for (auto& rigidBody : _rigidBodies)
+    {
+        rigidBody->CalcLocalTransform();
+    }
+
+    const auto& nodes = _nodeManager._sortedNodes;
+    for (const auto& node : nodes)
+    {
+        if (node->_parentBoneNode == nullptr)
+        {
+            node->UpdateGlobalTransform();
+        }
+    }
+
+    btDiscreteDynamicsWorld* world = PhysicsManager::_world.get();
+    for (auto& rigidBody : _rigidBodies)
+    {
+        rigidBody->Reset(world);
+    }
+}
+
+void PMXActor::UpdatePhysicsAnimation(DWORD elapse)
+{
+    for (auto& rigidBody : _rigidBodies)
+    {
+        rigidBody->SetActive(true);
+    }
+
+    //_physicsManager.Update(elapse);
+
+    for (auto& rigidBody : _rigidBodies)
+    {
+        rigidBody->ReflectGlobalTransform();
+    }
+
+    for (auto& rigidBody : _rigidBodies)
+    {
+        rigidBody->CalcLocalTransform();
+    }
+
+    const auto& nodes = _nodeManager._sortedNodes;
+    for (const auto& node : nodes)
+    {
+        if (node->_parentBoneNode == nullptr)
+        {
+            node->UpdateGlobalTransform();
+        }
+    }
 }
 
 bool PMXActor::InitGL() {

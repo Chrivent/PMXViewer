@@ -20,10 +20,9 @@ float PhysicsManager::_fixedTimeStep = 0.02f;
 int PhysicsManager::_maxSubStepCount = 5;
 
 std::thread PhysicsManager::_physicsUpdateThread = std::thread();
-bool PhysicsManager::_threadFlag = false;
+std::atomic<bool> PhysicsManager::_threadFlag = false;
 
 std::atomic<bool> PhysicsManager::_stopFlag(false);
-std::atomic<bool> PhysicsManager::_endFlag(false);
 
 struct FilterCallback : public btOverlapFilterCallback
 {
@@ -84,43 +83,39 @@ bool PhysicsManager::Create()
 
 void PhysicsManager::Destroy()
 {
-	if (_threadFlag == true)
-	{
-		_stopFlag.store(true);
+	ActivePhysics(false);
 
-		while (_endFlag.load() == false);
+	if (_world) {
+		if (_groundRB) _world->removeRigidBody(_groundRB.get());
 	}
+	_filterCB.reset();
+	_groundRB.reset();
+	_groundMS.reset();
+	_groundShape.reset();
 
-	if (_world != nullptr && _groundRB != nullptr)
-	{
-		_world->removeRigidBody(_groundRB.get());
-	}
-
-	_world = nullptr;
-	_broadPhase = nullptr;
-	_collisionConfig = nullptr;
-	_dispatcher = nullptr;
-	_solver = nullptr;
-	_groundShape = nullptr;
-	_groundMS = nullptr;
-	_groundRB = nullptr;
+	_world.reset();
+	_solver.reset();
+	_dispatcher.reset();
+	_collisionConfig.reset();
+	_broadPhase.reset();
 }
 
 void PhysicsManager::ActivePhysics(bool active)
 {
-	if (active == true)
+	if (active)
 	{
-		_stopFlag.store(false);
-		_endFlag.store(false);
-		_threadFlag = true;
-		_physicsUpdateThread = std::thread(UpdateByThread);
-		_physicsUpdateThread.detach();
+		if (_threadFlag.load()) return;
+		_stopFlag.store(false, std::memory_order_release);
+		_physicsUpdateThread = std::thread(&PhysicsManager::UpdateByThread); // ← this 없이
+		_threadFlag.store(true, std::memory_order_release);
 	}
 	else
 	{
-		_stopFlag.store(true);
-		while (_endFlag.load() == false);
-		_threadFlag = false;
+		if (!_threadFlag.load()) return;
+		_stopFlag.store(true, std::memory_order_release);
+		if (_physicsUpdateThread.joinable())
+			_physicsUpdateThread.join();   // detach 대신 join
+		_threadFlag.store(false, std::memory_order_release);
 	}
 }
 
@@ -157,21 +152,18 @@ void PhysicsManager::RemoveJoint(Joint* joint)
 void PhysicsManager::UpdateByThread()
 {
 	using clock = std::chrono::steady_clock;
-	auto prevTime = clock::now();
+	auto prev = clock::now();
+	constexpr float MAX_FRAME_SEC = 0.10f;
 
-	while (true)
+	while (!_stopFlag.load(std::memory_order_acquire))
 	{
-		if (_stopFlag.load() == true)
-		{
-			break;
-		}
+		auto now = clock::now();
+		float dt = std::chrono::duration<float>(now - prev).count();
+		prev = now;
 
-		auto currentTime = clock::now();
-		auto deltaTime = currentTime - prevTime;
-		prevTime = currentTime;
+		if (dt > MAX_FRAME_SEC) dt = MAX_FRAME_SEC;
+		if (_world) _world->stepSimulation(dt, _maxSubStepCount, _fixedTimeStep);
 
-		_world->stepSimulation(deltaTime.count() * 0.001f, _maxSubStepCount, _fixedTimeStep);
+		std::this_thread::sleep_for(std::chrono::milliseconds(1)); // 과열 방지
 	}
-
-	_endFlag.store(true);
 }

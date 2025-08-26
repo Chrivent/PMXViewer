@@ -64,6 +64,8 @@ public:
 
     IKSolver* _ikSolver;
 
+    bool _deformAfterPhysics;
+
 private:
     float GetYFromXOnBezier(float x, const glm::vec2& a, const glm::vec2& b, int n, float epsilon = 1e-5f);
 };

@@ -18,6 +18,7 @@ public:
 
     void BeforeUpdateAnimation();
     void UpdateAnimation(float frameNo);
+    void UpdateAnimationAfterPhysics(float frameNo);
 
     void Dispose();
 
