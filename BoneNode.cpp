@@ -186,7 +186,7 @@ void BoneNode::AnimateMotion(float frameNo) {
 
         float t = static_cast<float>(frameNo - rit->frame) / total;
 
-        const char* interp = reinterpret_cast<const char*>(next.interpolation);
+        const uint8_t* interp = reinterpret_cast<const uint8_t*>(next.interpolation);
 
         glm::vec2 p1x(interp[0], interp[1]);
         glm::vec2 p2x(interp[8], interp[9]);
