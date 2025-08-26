@@ -183,7 +183,7 @@ void NodeManager::UpdateAnimation(float frameNo) {
     }
 
     for (auto& lvl : _levels) {
-        std::for_each(std::execution::par_unseq, lvl.begin(), lvl.end(),
+        std::for_each(std::execution::par, lvl.begin(), lvl.end(),
             [&](BoneNode* n) {
                 if (n->_appendBoneNode != nullptr)
                 {

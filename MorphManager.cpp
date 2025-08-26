@@ -321,22 +321,22 @@ const BoneMorphData& MorphManager::GetMorphBone(unsigned int index) const
 void MorphManager::ResetMorphData()
 {
 	// pos
-	std::for_each(std::execution::par_unseq,
+	std::for_each(std::execution::par,
 		_morphVertexPosition.begin(), _morphVertexPosition.end(),
 		[](glm::vec3& v) { v = glm::vec3(0); });
 
 	// uv
-	std::for_each(std::execution::par_unseq,
+	std::for_each(std::execution::par,
 		_morphUV.begin(), _morphUV.end(),
 		[](glm::vec4& v) { v = glm::vec4(0); });
 
 	// material
-	std::for_each(std::execution::par_unseq,
+	std::for_each(std::execution::par,
 		_morphMaterial.begin(), _morphMaterial.end(),
 		[](MaterialMorphData& m) { m = MaterialMorphData{}; });
 
 	// bone
-	std::for_each(std::execution::par_unseq,
+	std::for_each(std::execution::par,
 		_morphBone.begin(), _morphBone.end(),
 		[](BoneMorphData& b) { b = BoneMorphData{}; });
 }
@@ -409,7 +409,7 @@ void MorphManager::AnimatePositionMorph(Morph& morph, float weight)
 	else {
 		// --- 큰 경우: 병렬 ---
 		// 중복 idx는 Init에서 이미 머지했으므로 레이스 없음
-		std::for_each(std::execution::par_unseq, A.begin(), A.end(),
+		std::for_each(std::execution::par, A.begin(), A.end(),
 			[&](const PosOffsetCached& d) {
 				out[d.idx] += d.delta * w;
 			});
