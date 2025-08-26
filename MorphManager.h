@@ -18,7 +18,7 @@ class Morph
 public:
 	Morph();
 
-	void SetPositionMorph(std::vector<pmx::PmxMorphVertexOffset> pmxPositionMorphs);
+	void SetPositionMorph(std::vector<pmx::PmxMorphVertexOffset> pmxPositionMorphs, size_t vertexBufferSize);
 	void SetUVMorph(std::vector<pmx::PmxMorphUVOffset> pmxUVMorphs);
 	void SetMaterialMorph(std::vector<pmx::PmxMorphMaterialOffset> pmxMaterialMorphs);
 	void SetBoneMorph(std::vector<pmx::PmxMorphBoneOffset> pmxBoneMorphs);

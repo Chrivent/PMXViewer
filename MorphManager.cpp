@@ -13,16 +13,43 @@ Morph::Morph()
 	_morphType = pmx::MorphType::Group;
 }
 
-void Morph::SetPositionMorph(std::vector<pmx::PmxMorphVertexOffset> pmxPositionMorphs)
+void Morph::SetPositionMorph(std::vector<pmx::PmxMorphVertexOffset> pmxPositionMorphs, size_t vertexBufferSize)
 {
 	_positionMorphData = std::move(pmxPositionMorphs);
-	_posCached.clear(); _posCached.reserve(_positionMorphData.size());
+	_posCached.clear();
+	_posCached.reserve(_positionMorphData.size());
+
 	for (auto& x : _positionMorphData) {
-		_posCached.push_back({ x.vertex_index, glm::make_vec3(x.position_offset) });
+		// 음수 인덱스는 unsigned로 말려올 수 있으니, 여기서 바로 거르려면 이렇게:
+		if (x.vertex_index < 0) continue;
+		_posCached.push_back({ x.vertex_index,
+							   glm::make_vec3(x.position_offset) });
 	}
-	// 2) 인덱스 정렬 (아래 참고)
+
+	// 1) 범위 밖 제거
+	_posCached.erase(
+		std::remove_if(_posCached.begin(), _posCached.end(),
+			[vertexBufferSize](const PosOffsetCached& d) {
+				return d.idx >= vertexBufferSize;
+			}),
+		_posCached.end());
+
+	// 2) 정렬
 	std::sort(_posCached.begin(), _posCached.end(),
-		[](auto& a, auto& b) { return a.idx < b.idx; });
+		[](const PosOffsetCached& a, const PosOffsetCached& b) {
+			return a.idx < b.idx;
+		});
+
+	// 3) 중복 idx 머지
+	std::vector<PosOffsetCached> merged;
+	merged.reserve(_posCached.size());
+	for (size_t i = 0; i < _posCached.size(); ) {
+		const int idx = _posCached[i].idx;
+		glm::vec3 acc(0.0f);
+		do { acc += _posCached[i].delta; ++i; } while (i < _posCached.size() && _posCached[i].idx == idx);
+		merged.push_back({ idx, acc });
+	}
+	_posCached.swap(merged);
 }
 
 void Morph::SetUVMorph(std::vector<pmx::PmxMorphUVOffset> pmxUVMorphs)
@@ -95,7 +122,7 @@ void MorphManager::Init(const pmx::PmxMorph* pmxMorphs,
 				v.assign(src.vertex_offsets.get(),
 					src.vertex_offsets.get() + src.offset_count);
 			}
-			cur.SetPositionMorph(std::move(v));
+			cur.SetPositionMorph(std::move(v), vertexCount);
 			break;
 		}
 		case pmx::MorphType::UV:
@@ -352,15 +379,41 @@ void MorphManager::AnimatePositionMorph(Morph& morph, float weight)
 	if (A.empty()) return;
 
 	const float w = morph._weight * weight;
-	glm::vec3* __restrict out = _morphVertexPosition.data();
-	const size_t N = _morphVertexPosition.size();
+	// 1) weight 스킵 (분기/연산 모두 제거)
+	if (std::abs(w) <= 1e-8f) return;
 
-	std::for_each(std::execution::par_unseq, A.begin(), A.end(),
-		[&](const PosOffsetCached& d) {
-			const uint32_t idx = d.idx;
-			if (idx >= N) return;
-			out[idx] += d.delta * w;
-		});
+	glm::vec3* __restrict out = _morphVertexPosition.data();
+
+	// 3) 연속 인덱스(run) 처리 + 4) 크기 기준 하이브리드
+	constexpr size_t kParallelThreshold = 4096;
+
+	if (A.size() < kParallelThreshold) {
+		// --- 작은 경우: 직렬 + run 처리 (캐시 친화적, 분기 최소화) ---
+		const PosOffsetCached* p = A.data();
+		const glm::vec3 ww(w);           // 스칼라 곱 최소화
+		size_t i = 0, n = A.size();
+		while (i < n) {
+			uint32_t idx0 = p[i].idx;
+			size_t j = i + 1;
+			// 연속 인덱스 구간 길이 찾기
+			while (j < n && p[j].idx == idx0 + (j - i)) ++j;
+
+			// 연속 구간 일괄 처리 (분기/인덱스 계산 감소)
+			glm::vec3* __restrict dst = out + idx0;
+			for (size_t k = 0; k < (j - i); ++k) {
+				dst[k] += p[i + k].delta * ww;
+			}
+			i = j;
+		}
+	}
+	else {
+		// --- 큰 경우: 병렬 ---
+		// 중복 idx는 Init에서 이미 머지했으므로 레이스 없음
+		std::for_each(std::execution::par_unseq, A.begin(), A.end(),
+			[&](const PosOffsetCached& d) {
+				out[d.idx] += d.delta * w;
+			});
+	}
 }
 
 void MorphManager::AnimateUVMorph(Morph& morph, float weight)
