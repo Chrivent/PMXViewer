@@ -45,7 +45,7 @@ bool RigidBody::Init(const pmx::PmxRigidBody& rb, NodeManager* nodeManager, Bone
 
     glm::mat4 translate = glm::translate(glm::mat4(1.0f),
         glm::vec3(rb.position[0], rb.position[1], rb.position[2]));
-    glm::mat4 rigidBodyMat = rotation * translate; // 원 코드와 동일: rotation * translation
+    glm::mat4 rigidBodyMat = translate * rotation;
 
     // 4) 오프셋 계산 (offset = rigidBodyMat * inverse(boneGlobal))
     BoneNode* kinematicNode = nullptr;
