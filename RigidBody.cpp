@@ -37,11 +37,10 @@ bool RigidBody::Init(const pmx::PmxRigidBody& rb, NodeManager* nodeManager, Bone
         _shape->calculateLocalInertia(mass, localInertia);
     }
 
-    // 3) RigidBody Transform (rotation * translation : 원본과 동일한 순서 유지)
     glm::mat4 rotation(1.0f);
-    rotation = glm::rotate(rotation, rb.orientation[0], glm::vec3(1, 0, 0)); // X (Pitch)
-    rotation = glm::rotate(rotation, rb.orientation[1], glm::vec3(0, 1, 0)); // Y (Yaw)
-    rotation = glm::rotate(rotation, rb.orientation[2], glm::vec3(0, 0, 1)); // Z (Roll)
+    rotation = glm::rotate(rotation, rb.orientation[0], glm::vec3(0, 0, 1));
+    rotation = glm::rotate(rotation, rb.orientation[1], glm::vec3(0, 1, 0));
+    rotation = glm::rotate(rotation, rb.orientation[2], glm::vec3(1, 0, 0));
 
     glm::mat4 translate = glm::translate(glm::mat4(1.0f),
         glm::vec3(rb.position[0], rb.position[1], rb.position[2]));

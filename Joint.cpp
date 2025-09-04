@@ -5,8 +5,7 @@
 static btTransform MakeWorldAnchor(const float pos[3], const float euler[3])
 {
     btMatrix3x3 basis;
-    // 원본 코드와 동일하게 setEulerZYX(x, y, z) 사용 (데이터 축 해석 유지)
-    basis.setEulerZYX(euler[0], euler[1], euler[2]);
+    basis.setEulerZYX(euler[2], euler[1], euler[0]);
 
     btTransform t;
     t.setIdentity();
