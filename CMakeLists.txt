@@ -15,7 +15,6 @@ add_executable(PMXViewer
     "main.cpp" "stb_image.h" "stb_image_resize2.h"
     "EncodingHelper.h"
     "Pmx.h" "Pmx.cpp" "Vmd.h"
-     
     "IKSolver.h" "IKSolver.cpp"
     "NodeManager.h" "NodeManager.cpp"
     "MorphManager.h" "MorphManager.cpp"
