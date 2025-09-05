@@ -4,7 +4,7 @@
 #include <glm/gtx/quaternion.hpp>
 #include <glm/gtx/euler_angles.hpp>
 
-#include "BoneNode.h"
+#include "NodeManager.h"
 
 IKChain::IKChain(BoneNode* linkNode, bool axisLimit, const glm::vec3& limitMinimum, const glm::vec3& limitMaximum)
 {

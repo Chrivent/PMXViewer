@@ -15,15 +15,12 @@ add_executable(PMXViewer
     "main.cpp" "stb_image.h" "stb_image_resize2.h"
     "EncodingHelper.h"
     "Pmx.h" "Pmx.cpp" "Vmd.h"
-    "BoneNode.h" "BoneNode.cpp"
+     
     "IKSolver.h" "IKSolver.cpp"
     "NodeManager.h" "NodeManager.cpp"
     "MorphManager.h" "MorphManager.cpp"
     "PMXActor.h" "PMXActor.cpp"
     "miniaudio.h"
-    "MotionState.h" "MotionState.cpp"
-    "RigidBody.h" "RigidBody.cpp"
-    "Joint.h" "Joint.cpp"
     "PhysicsManager.h" "PhysicsManager.cpp"
  )
 

@@ -1,47 +1,167 @@
 #pragma once
 
 #include <btBulletDynamicsCommon.h>
-#include <memory>
-#include <thread>
+#include <glm/gtc/type_ptr.hpp>
 
-class RigidBody;
-class Joint;
+#include "Pmx.h"
+
+class NodeManager;
+class BoneNode;
+
+class MotionState : public btMotionState
+{
+public:
+	virtual void Reset() = 0;
+	virtual void ReflectGlobalTransform() = 0;
+};
+
+class DefaultMotionState : public MotionState
+{
+public:
+	DefaultMotionState(const glm::mat4& transform);
+
+	void getWorldTransform(btTransform& worldTrans) const override;
+	void setWorldTransform(const btTransform& worldTrans) override;
+	void Reset() override;
+	void ReflectGlobalTransform() override;
+
+private:
+	btTransform _initTransform;
+	btTransform _transform;
+};
+
+class DynamicMotionState : public MotionState
+{
+public:
+	DynamicMotionState(BoneNode* boneNode, const glm::mat4& offset, bool overrideBone = true);
+
+	void getWorldTransform(btTransform& worldTrans) const override;
+	void setWorldTransform(const btTransform& worldTrans) override;
+	void Reset() override;
+	void ReflectGlobalTransform() override;
+
+private:
+	BoneNode* _boneNode = nullptr;
+	glm::mat4   _offset{ 1.0f };
+	glm::mat4   _invOffset{ 1.0f };
+	btTransform _transform;
+	bool        _override = true;
+};
+
+class DynamicAndBoneMergeMotionState : public MotionState
+{
+public:
+	DynamicAndBoneMergeMotionState(BoneNode* boneNode, const glm::mat4& offset, bool overrideBone = true);
+
+	void getWorldTransform(btTransform& worldTrans) const override;
+	void setWorldTransform(const btTransform& worldTrans) override;
+	void Reset() override;
+	void ReflectGlobalTransform() override;
+
+private:
+	BoneNode* _boneNode = nullptr;
+	glm::mat4   _offset{ 1.0f };
+	glm::mat4   _invOffset{ 1.0f };
+	btTransform _transform;
+	bool        _override = true;
+};
+
+class KinematicMotionState : public MotionState
+{
+public:
+	KinematicMotionState(BoneNode* node, const glm::mat4& offset);
+
+	void getWorldTransform(btTransform& worldTrans) const override;
+	void setWorldTransform(const btTransform& worldTrans) override;
+	void Reset() override;
+	void ReflectGlobalTransform() override;
+
+private:
+	BoneNode* _boneNode = nullptr;
+	glm::mat4  _offset{ 1.0f };
+};
+
+class RigidBody
+{
+public:
+	bool Create(const pmx::PmxRigidBody& pmxRigidBody, NodeManager* nodeManager, BoneNode* boneNode);
+	void Destroy();
+
+	void SetActivation(bool active);
+	void Reset(btDiscreteDynamicsWorld* world);
+	void ResetTransform();
+	void ReflectGlobalTransform();
+	void CalcLocalTransform();
+
+	glm::mat4 GetTransform();
+
+	uint8_t         _rigidBodyType = 0;
+	unsigned short  _group = 0;
+	unsigned short  _groupMask = 0;
+
+	std::unique_ptr<btCollisionShape>  _shape;
+	std::unique_ptr<MotionState>       _activeMotionState;
+	std::unique_ptr<MotionState>       _kinematicMotionState;
+	std::unique_ptr<btRigidBody>       _rigidBody;
+
+	BoneNode* _node = nullptr;
+	glm::mat4       _offsetMatrix{ 1.0f };
+
+	std::wstring    _name;
+};
+
+class Joint
+{
+public:
+	bool CreateJoint(const pmx::PmxJoint& pmxJoint, RigidBody* rigidBody0, RigidBody* rigidBody1);
+	void Destroy();
+
+	std::unique_ptr<btTypedConstraint> _constraint;
+};
+
+class Physics
+{
+public:
+	~Physics();
+
+	bool Create();
+	void Destroy();
+
+	void Update(float time);
+
+	void AddRigidBody(RigidBody* rigidBody);
+	void RemoveRigidBody(RigidBody* rigidBody);
+	void AddJoint(Joint* joint);
+	void RemoveJoint(Joint* joint);
+
+public:
+	std::unique_ptr<btDiscreteDynamicsWorld> _world;
+	std::unique_ptr<btBroadphaseInterface> _broadPhase;
+	std::unique_ptr<btDefaultCollisionConfiguration> _collisionConfig;
+	std::unique_ptr<btCollisionDispatcher> _dispatcher;
+	std::unique_ptr<btSequentialImpulseConstraintSolver> _solver;
+	std::unique_ptr<btCollisionShape> _groundShape;
+	std::unique_ptr<btMotionState> _groundMS;
+	std::unique_ptr<btRigidBody> _groundRB;
+	std::unique_ptr<btOverlapFilterCallback> _filterCB;
+
+	double _fps;
+	int _maxSubStepCount;
+};
 
 class PhysicsManager
 {
 public:
-	PhysicsManager(const PhysicsManager& other) = delete;
-	PhysicsManager& operator = (const PhysicsManager& other) = delete;
+	PhysicsManager();
+	~PhysicsManager();
 
-	static bool Create();
-	static void Destroy();
+	bool Create();
 
-	static void ActivePhysics(bool active);
+	RigidBody* AddRigidBody();
+	Joint* AddJoint();
 
-	static void AddRigidBody(RigidBody* rigidBody);
-	static void RemoveRigidBody(RigidBody* rigidBody);
-	static void AddJoint(Joint* joint);
-	static void RemoveJoint(Joint* joint);
+	std::unique_ptr<Physics>	_Physics;
 
-private:
-	static void UpdateByThread();
-
-public:
-	static std::unique_ptr<btDiscreteDynamicsWorld> _world;
-	static std::unique_ptr<btBroadphaseInterface> _broadPhase;
-	static std::unique_ptr<btDefaultCollisionConfiguration> _collisionConfig;
-	static std::unique_ptr<btCollisionDispatcher> _dispatcher;
-	static std::unique_ptr<btSequentialImpulseConstraintSolver> _solver;
-	static std::unique_ptr<btCollisionShape> _groundShape;
-	static std::unique_ptr<btMotionState> _groundMS;
-	static std::unique_ptr<btRigidBody> _groundRB;
-	static std::unique_ptr<btOverlapFilterCallback> _filterCB;
-
-	static float _fixedTimeStep;
-	static int _maxSubStepCount;
-
-	static std::thread _physicsUpdateThread;
-	static std::atomic<bool> _threadFlag;
-
-	static std::atomic<bool> _stopFlag;
+	std::vector<std::unique_ptr<RigidBody>>	_rigidBodys;
+	std::vector<std::unique_ptr<Joint>>		_joints;
 };

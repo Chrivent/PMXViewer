@@ -4,6 +4,8 @@
 #include <execution>
 #include <algorithm>
 #include <chrono>
+#include <iomanip>
+#include <sstream>
 
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/quaternion.hpp>
@@ -12,9 +14,6 @@
 // STB 구현은 '딱 한 곳'에서만: 여기서 구현하세요
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
-
-#include "BoneNode.h"
-#include "PhysicsManager.h"
 
 struct MaterialUniforms {
     GLint loc_bUseToon, loc_bUseSphere, loc_sphereMode;
@@ -44,8 +43,6 @@ PMXActor::~PMXActor() {
     if (_vbo) glDeleteBuffers(1, &_vbo);
     if (_vao) glDeleteVertexArrays(1, &_vao);
     for (auto t : _textures) if (t) glDeleteTextures(1, &t);
-
-    PhysicsManager::Destroy();
 }
 
 bool PMXActor::LoadModel(const std::wstring& pmxPath) {
@@ -94,36 +91,26 @@ bool PMXActor::LoadMotion(const std::wstring& vmdPath) {
         static_cast<unsigned>(_model.bone_count)
     );
 
-    PhysicsManager::Create();
-    InitPhysics();
-    ResetPhysics();
-
-    return true;
-}
-
-void PMXActor::InitPhysics()
-{
-    PhysicsManager::ActivePhysics(false);
+    if (!_PhysicsManager.Create())
+    {
+        return false;
+    }
 
     if (_model.rigid_body_count > 0 && _model.rigid_bodies) {
         for (int i = 0; i < _model.rigid_body_count; ++i) {
-            const pmx::PmxRigidBody& pmxRigidBody = _model.rigid_bodies[i];
+            const pmx::PmxRigidBody& pmxRB = _model.rigid_bodies[i];
 
-            RigidBody* rigidBody = new RigidBody();
-            _rigidBodies.emplace_back(std::move(rigidBody));
-
-            BoneNode* boneNode = nullptr;
-            if (pmxRigidBody.target_bone != -1)
+            auto rb = _PhysicsManager.AddRigidBody();
+            BoneNode* node = nullptr;
+            if (pmxRB.target_bone != -1)
             {
-                boneNode = _nodeManager.GetBoneNodeByIndex(pmxRigidBody.target_bone);
+                node = _nodeManager.GetBoneNodeByIndex(pmxRB.target_bone);
             }
-
-            if (rigidBody->Init(pmxRigidBody, &_nodeManager, boneNode) == false)
+            if (!rb->Create(pmxRB, &_nodeManager, node))
             {
-                OutputDebugStringA("Create Rigid Body Fail");
-                continue;
+                return false;
             }
-            PhysicsManager::AddRigidBody(rigidBody);
+            _PhysicsManager._Physics.get()->AddRigidBody(rb);
         }
     }
 
@@ -135,100 +122,93 @@ void PMXActor::InitPhysics()
                 pmxJoint.param.rigid_body2 != -1 &&
                 pmxJoint.param.rigid_body1 != pmxJoint.param.rigid_body2)
             {
-                Joint* joint = new Joint();
-                _joints.emplace_back(std::move(joint));
-
-                RigidBody* rigidBodyA = nullptr;
-                if (_rigidBodies.size() <= pmxJoint.param.rigid_body1)
+                auto joint = _PhysicsManager.AddJoint();
+                BoneNode* node = nullptr;
+                auto& rigidBodys = _PhysicsManager._rigidBodys;
+                bool ret = joint->CreateJoint(
+                    pmxJoint,
+                    rigidBodys[pmxJoint.param.rigid_body1].get(),
+                    rigidBodys[pmxJoint.param.rigid_body2].get()
+                );
+                if (!ret)
                 {
-                    OutputDebugStringA("Create Joint Fail");
-                    continue;
+                    return false;
                 }
-
-                rigidBodyA = _rigidBodies[pmxJoint.param.rigid_body1].get();
-
-                RigidBody* rigidBodyB = nullptr;
-                if (_rigidBodies.size() <= pmxJoint.param.rigid_body2)
-                {
-                    OutputDebugStringA("Create Joint Fail");
-                    continue;
-                }
-
-                rigidBodyB = _rigidBodies[pmxJoint.param.rigid_body2].get();
-
-                if (rigidBodyA->_rigidBody->isStaticOrKinematicObject() == true &&
-                    rigidBodyB->_rigidBody->isStaticOrKinematicObject() == true)
-                {
-                    int d = 0;
-                }
-
-                if (joint->CreateJoint(pmxJoint, rigidBodyA, rigidBodyB) == false)
-                {
-                    OutputDebugStringA("Create Joint Fail");
-                    continue;
-                }
-
-                PhysicsManager::AddJoint(joint);
+                _PhysicsManager._Physics.get()->AddJoint(joint);
             }
         }
     }
 
-    PhysicsManager::ActivePhysics(true);
+    ResetPhysics();
+
+    return true;
 }
 
 void PMXActor::ResetPhysics()
 {
-    for (auto& rigidBody : _rigidBodies)
+    auto physics = _PhysicsManager._Physics.get();
+
+    if (physics == nullptr)
     {
-        rigidBody->SetActive(false);
-        rigidBody->ResetTransform();
+        return;
     }
 
-    for (auto& rigidBody : _rigidBodies)
+    auto& rigidbodys = _PhysicsManager._rigidBodys;
+    for (auto& rb : rigidbodys)
     {
-        rigidBody->ReflectGlobalTransform();
+        rb->SetActivation(false);
+        rb->ResetTransform();
     }
 
-    for (auto& rigidBody : _rigidBodies)
+    physics->Update(1.0f / 60.0f);
+
+    for (auto& rb : rigidbodys)
     {
-        rigidBody->CalcLocalTransform();
+        rb->ReflectGlobalTransform();
     }
 
-    const auto& nodes = _nodeManager._sortedNodes;
-    for (const auto& node : nodes)
+    for (auto& rb : rigidbodys)
+    {
+        rb->CalcLocalTransform();
+    }
+
+    for (const auto& node : _nodeManager._sortedNodes)
     {
         if (node->_parentBoneNode == nullptr)
         {
             node->UpdateGlobalTransform();
         }
     }
-
-    btDiscreteDynamicsWorld* world = PhysicsManager::_world.get();
-    for (auto& rigidBody : _rigidBodies)
-    {
-        rigidBody->Reset(world);
-    }
 }
 
 void PMXActor::UpdatePhysicsAnimation()
 {
-    for (auto& rigidBody : _rigidBodies)
+    auto physics = _PhysicsManager._Physics.get();
+
+    if (physics == nullptr)
     {
-        rigidBody->SetActive(true);
+        return;
     }
 
-    for (auto& rigidBody : _rigidBodies)
+    auto& rigidbodys = _PhysicsManager._rigidBodys;
+    for (auto& rb : rigidbodys)
     {
-        rigidBody->ReflectGlobalTransform();
+        rb->SetActivation(true);
     }
 
-    for (auto& rigidBody : _rigidBodies)
+    physics->Update(1.0f / 60.0f);
+
+    for (auto& rb : rigidbodys)
     {
-        rigidBody->CalcLocalTransform();
+        rb->ReflectGlobalTransform();
     }
 
-    const auto& nodes = _nodeManager._sortedNodes;
-    for (const auto& node : nodes)
+    for (auto& rb : rigidbodys)
+    {
+        rb->CalcLocalTransform();
+    }
+
+    for (const auto& node : _nodeManager._sortedNodes)
     {
         if (node->_parentBoneNode == nullptr)
         {

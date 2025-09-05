@@ -8,9 +8,7 @@
 #include "Vmd.h"
 #include "NodeManager.h"
 #include "MorphManager.h"
-#include "RigidBody.h"
-#include "Joint.h"
-#include "MotionState.h"
+#include "PhysicsManager.h"
 
 // 정점 포맷
 struct GLVertex {
@@ -49,7 +47,6 @@ public:
     bool LoadModel(const std::wstring& pmxPath);
     bool LoadMotion(const std::wstring& vmdPath);
 
-    void InitPhysics();
     void ResetPhysics();
     void UpdatePhysicsAnimation();
 
@@ -99,6 +96,7 @@ private:
     std::unique_ptr<vmd::VmdMotion> _motion;
     NodeManager _nodeManager;
     MorphManager _morphManager;
+    PhysicsManager _PhysicsManager;
 
     std::vector<GLVertex>  _vertices;  // CPU-side skinned vertices
     std::vector<uint32_t>  _indices;
@@ -124,7 +122,4 @@ private:
     GLint _lastTex0 = -1, _lastTex1 = -1, _lastTex2 = -1;
 
     std::vector<EffectiveMaterial> _matCache;
-
-    std::vector<std::unique_ptr<RigidBody>> _rigidBodies;
-    std::vector<std::unique_ptr<Joint>> _joints;
 };
