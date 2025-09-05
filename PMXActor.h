@@ -47,6 +47,7 @@ public:
     bool LoadModel(const std::wstring& pmxPath);
     bool LoadMotion(const std::wstring& vmdPath);
 
+    void InitPhysics();
     void ResetPhysics();
     void UpdatePhysicsAnimation();
 

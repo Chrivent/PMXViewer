@@ -2,6 +2,7 @@
 
 #include <btBulletDynamicsCommon.h>
 #include <glm/gtc/type_ptr.hpp>
+#include <thread>
 
 #include "Pmx.h"
 
@@ -127,8 +128,6 @@ public:
 	bool Create();
 	void Destroy();
 
-	void Update(float time);
-
 	void AddRigidBody(RigidBody* rigidBody);
 	void RemoveRigidBody(RigidBody* rigidBody);
 	void AddJoint(Joint* joint);
@@ -144,9 +143,6 @@ public:
 	std::unique_ptr<btMotionState> _groundMS;
 	std::unique_ptr<btRigidBody> _groundRB;
 	std::unique_ptr<btOverlapFilterCallback> _filterCB;
-
-	double _fps;
-	int _maxSubStepCount;
 };
 
 class PhysicsManager
@@ -164,4 +160,13 @@ public:
 
 	std::vector<std::unique_ptr<RigidBody>>	_rigidBodys;
 	std::vector<std::unique_ptr<Joint>>		_joints;
+
+	void ActivePhysics(bool active);
+	void UpdateByThread();
+
+	std::thread _physicsUpdateThread;
+	bool _threadFlag;
+
+	std::atomic<bool> _stopFlag;
+	std::atomic<bool> _endFlag;
 };

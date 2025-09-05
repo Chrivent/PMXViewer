@@ -93,10 +93,16 @@ bool PMXActor::LoadMotion(const std::wstring& vmdPath) {
 
     _nodeManager.UpdateAnimation();
 
-    if (!_PhysicsManager.Create())
-    {
-        return false;
-    }
+    InitPhysics();
+    ResetPhysics();
+
+    return true;
+}
+
+void PMXActor::InitPhysics()
+{
+    _PhysicsManager.Create();
+    _PhysicsManager.ActivePhysics(false);
 
     if (_model.rigid_body_count > 0 && _model.rigid_bodies) {
         for (int i = 0; i < _model.rigid_body_count; ++i) {
@@ -110,7 +116,7 @@ bool PMXActor::LoadMotion(const std::wstring& vmdPath) {
             }
             if (!rb->Create(pmxRB, &_nodeManager, node))
             {
-                return false;
+                continue;
             }
             _PhysicsManager._Physics.get()->AddRigidBody(rb);
         }
@@ -134,16 +140,14 @@ bool PMXActor::LoadMotion(const std::wstring& vmdPath) {
                 );
                 if (!ret)
                 {
-                    return false;
+                    continue;
                 }
                 _PhysicsManager._Physics.get()->AddJoint(joint);
             }
         }
     }
 
-    ResetPhysics();
-
-    return true;
+    _PhysicsManager.ActivePhysics(true);
 }
 
 void PMXActor::ResetPhysics()
@@ -161,8 +165,6 @@ void PMXActor::ResetPhysics()
         rb->SetActivation(false);
         rb->ResetTransform();
     }
-
-    physics->Update(1.0f / 60.0f);
 
     for (auto& rb : rigidbodys)
     {
@@ -197,8 +199,6 @@ void PMXActor::UpdatePhysicsAnimation()
     {
         rb->SetActivation(true);
     }
-
-    physics->Update(1.0f / 60.0f);
 
     for (auto& rb : rigidbodys)
     {

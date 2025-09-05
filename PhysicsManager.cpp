@@ -502,14 +502,6 @@ void Physics::Destroy()
 	_groundRB = nullptr;
 }
 
-void Physics::Update(float time)
-{
-	if (_world != nullptr)
-	{
-		_world->stepSimulation(time, _maxSubStepCount, static_cast<btScalar>(1.0 / _fps));
-	}
-}
-
 void Physics::AddRigidBody(RigidBody* mmdRB)
 {
 	_world->addRigidBody(
@@ -542,21 +534,31 @@ void Physics::RemoveJoint(Joint* mmdJoint)
 
 PhysicsManager::PhysicsManager()
 {
-
+    _threadFlag = false;
+    _stopFlag.store(false);
+    _endFlag.store(true);
 }
 
 PhysicsManager::~PhysicsManager()
 {
-    for (auto& joint : _joints)
-    {
-        _Physics->RemoveJoint(joint.get());
+    if (_threadFlag) {
+        _stopFlag.store(true);
+        if (_physicsUpdateThread.joinable())
+            _physicsUpdateThread.join();
+        _threadFlag = false;
+        _endFlag.store(true);
     }
-    _joints.clear();
 
-    for (auto& rb : _rigidBodys)
-    {
-        _Physics->RemoveRigidBody(rb.get());
+    if (_Physics && _Physics->_world) {
+        for (auto& j : _joints) {
+            _Physics->RemoveJoint(j.get());
+        }
+        for (auto& rb : _rigidBodys) {
+            _Physics->RemoveRigidBody(rb.get());
+        }
     }
+
+    _joints.clear();
     _rigidBodys.clear();
 
     _Physics.reset();
@@ -584,4 +586,56 @@ Joint* PhysicsManager::AddJoint()
 	_joints.emplace_back(std::move(joint));
 
 	return ret;
+}
+
+void PhysicsManager::ActivePhysics(bool active)
+{
+    if (active)
+    {
+        if (_threadFlag) return;
+        _stopFlag.store(false);
+        _endFlag.store(false);
+        _threadFlag = true;
+
+        _physicsUpdateThread = std::thread(&PhysicsManager::UpdateByThread, this);
+    }
+    else
+    {
+        if (!_threadFlag) return;
+        _stopFlag.store(true);
+
+        if (_physicsUpdateThread.joinable())
+            _physicsUpdateThread.join();
+
+        _threadFlag = false;
+        _endFlag.store(true);
+    }
+}
+
+void PhysicsManager::UpdateByThread()
+{
+    using clock = std::chrono::steady_clock;
+    auto prev = clock::now();
+
+    const int    kMaxSubSteps = 5;
+    const double kFixedTimeStep = 0.02;
+
+    while (!_stopFlag.load())
+    {
+        auto now = clock::now();
+        double dt = std::chrono::duration<double>(now - prev).count();
+        prev = now;
+
+        if (dt > 0.25) dt = 0.25;
+
+        auto phys = _Physics.get();
+        if (phys && phys->_world)
+        {
+            phys->_world->stepSimulation(dt, kMaxSubSteps, (btScalar)kFixedTimeStep);
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+
+    _endFlag.store(true);
 }
