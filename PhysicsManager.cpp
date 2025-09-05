@@ -310,23 +310,6 @@ void RigidBody::ReflectGlobalTransform()
 
 void RigidBody::CalcLocalTransform()
 {
-    if (_node == nullptr)
-        return;
-
-    const BoneNode* parent = _node->_parentBoneNode;
-    if (parent == nullptr)
-    {
-        _node->_localTransform = _node->_globalTransform;
-    }
-    else
-    {
-        const glm::mat4& parentGlobal = parent->_globalTransform;
-        const glm::mat4& childGlobal = _node->_globalTransform;
-
-        glm::mat4 local = glm::inverse(parentGlobal) * childGlobal;
-        _node->_localTransform = local;
-    }
-
     if (_node != nullptr)
     {
         auto parent = _node->_parentBoneNode;
