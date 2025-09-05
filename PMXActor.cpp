@@ -91,6 +91,8 @@ bool PMXActor::LoadMotion(const std::wstring& vmdPath) {
         static_cast<unsigned>(_model.bone_count)
     );
 
+    _nodeManager.UpdateAnimation();
+
     if (!_PhysicsManager.Create())
     {
         return false;
