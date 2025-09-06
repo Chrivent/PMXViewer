@@ -183,6 +183,12 @@ void PMXActor::ResetPhysics()
             node->UpdateGlobalTransform();
         }
     }
+
+    btDiscreteDynamicsWorld* world = _PhysicsManager._Physics.get()->_world.get();
+    for (auto& rigidBody : _PhysicsManager._rigidBodys)
+    {
+        rigidBody->Reset(world);
+    }
 }
 
 void PMXActor::UpdatePhysicsAnimation()

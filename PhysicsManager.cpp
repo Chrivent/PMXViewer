@@ -482,6 +482,10 @@ bool Physics::Create()
 	_world->getPairCache()->setOverlapFilterCallback(filterCB.get());
 	_filterCB = std::move(filterCB);
 
+    btContactSolverInfo& info = _world->getSolverInfo();
+    info.m_numIterations = 4;
+    info.m_solverMode = SOLVER_SIMD;
+
 	return true;
 }
 
